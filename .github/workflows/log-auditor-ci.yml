@@ -86,9 +86,9 @@ jobs:
             echo "Checking LocalStack health..."
             
             # Check if LocalStack container is running
-            if ! docker ps | grep -q localstack; then
+            if ! docker ps | grep -q localstack-main; then
               echo "LocalStack container is not running"
-              docker logs localstack --tail 20
+              docker logs localstack-main --tail 20
               exit 1
             fi
             
@@ -113,9 +113,9 @@ jobs:
           done
         ' || {
           echo "LocalStack failed to start within timeout. Checking logs..."
-          docker logs localstack --tail 50
+          docker logs localstack-main --tail 50
           echo "Container status:"
-          docker ps -a | grep localstack
+          docker ps -a | grep localstack-main
           exit 1
         }
         
