@@ -37,6 +37,18 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y jq
         
+    - name: Configure AWS credentials for LocalStack
+      run: |
+        # Configure dummy AWS credentials for LocalStack
+        aws configure set aws_access_key_id test
+        aws configure set aws_secret_access_key test
+        aws configure set default.region us-east-1
+        aws configure set default.output json
+        
+        # Verify configuration
+        echo "AWS configuration:"
+        aws configure list
+        
     - name: Make test script executable
       run: chmod +x test-comprehensive.sh
       
