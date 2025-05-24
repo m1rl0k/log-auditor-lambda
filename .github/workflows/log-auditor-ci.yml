@@ -144,10 +144,17 @@ jobs:
     - name: Find test results directory
       id: find-results
       run: |
-        RESULTS_DIR=$(find . -name "test-results-*" -type d | head -1)
+        # Use more aggressive search to find test results directory
+        RESULTS_DIR=$(find . -type d -name "test-results-*" 2>/dev/null | head -1)
         if [ -z "$RESULTS_DIR" ]; then
-          echo "No test results directory found!"
-          exit 1
+          # Look in the repository root directory
+          RESULTS_DIR=$(find $GITHUB_WORKSPACE -type d -name "test-results-*" 2>/dev/null | head -1)
+          if [ -z "$RESULTS_DIR" ]; then
+            echo "No test results directory found!"
+            ls -la
+            echo "Current directory: $(pwd)"
+            exit 1
+          fi
         fi
         echo "results_dir=$RESULTS_DIR" >> $GITHUB_OUTPUT
         echo "Found results directory: $RESULTS_DIR"
@@ -334,9 +341,15 @@ jobs:
         
     - name: Display ${{ matrix.service }} results
       run: |
-        # Find the results directory
-        RESULTS_DIR=$(find . -name "test-results-*" -type d | head -1)
+        # Find the results directory with more aggressive search
+        RESULTS_DIR=$(find . -type d -name "test-results-*" 2>/dev/null | head -1)
+        if [ -z "$RESULTS_DIR" ]; then
+          # Look in the repository root directory
+          RESULTS_DIR=$(find $GITHUB_WORKSPACE -type d -name "test-results-*" 2>/dev/null | head -1)
+        fi
         ANALYSIS_FILE="$RESULTS_DIR/analysis-results/${{ matrix.service }}-analysis.json"
+        
+        echo "Looking for analysis file at: $ANALYSIS_FILE"
         
         if [ ! -f "$ANALYSIS_FILE" ]; then
           echo "❌ Analysis file not found for ${{ matrix.service }}: $ANALYSIS_FILE"
