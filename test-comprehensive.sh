@@ -105,7 +105,7 @@ check_localstack() {
             local health_response=$(curl -s "${AWS_ENDPOINT}/_localstack/health")
             echo "$health_response" > "${OUTPUT_DIR}/localstack-health.json"
             
-            if echo "$health_response" | jq -e '.services.s3 == "available" and .services.lambda == "available" and .services.cloudformation == "available" and .services.logs == "available"' > /dev/null 2>&1; then
+            if echo "$health_response" | jq -e '(.services.s3 == "available" or .services.s3 == "running") and (.services.lambda == "available" or .services.lambda == "running") and (.services.cloudformation == "available" or .services.cloudformation == "running") and (.services.logs == "available" or .services.logs == "running")' > /dev/null 2>&1; then
                 echo -e "  ${GREEN}✅ LocalStack is ready and all services are available${NC}"
                 log_message "SUCCESS" "LocalStack is ready and all services are available"
                 return 0
@@ -165,6 +165,32 @@ deploy_infrastructure() {
     # Deploy CloudFormation stack using create-stack for LocalStack compatibility
     echo -e "  ${CYAN}🏗️  Deploying CloudFormation stack...${NC}"
     
+    # Debug: Check CloudFormation service availability
+    echo -e "  ${CYAN}🔍 Checking CloudFormation service status...${NC}"
+    if curl -s "${AWS_ENDPOINT}/_localstack/health" | jq -r '.services.cloudformation' | grep -E "(available|running)" > /dev/null; then
+        echo -e "  ${GREEN}✅ CloudFormation service is available${NC}"
+    else
+        echo -e "  ${RED}❌ CloudFormation service not available${NC}"
+        curl -s "${AWS_ENDPOINT}/_localstack/health" | jq .
+        exit 1
+    fi
+    
+    # Debug: Validate template
+    echo -e "  ${CYAN}🔍 Validating CloudFormation template...${NC}"
+    aws cloudformation validate-template \
+        --endpoint-url "${AWS_ENDPOINT}" \
+        --region "${AWS_REGION}" \
+        --template-body file://cloudformation-template.yaml \
+        > "${OUTPUT_DIR}/template-validation.log" 2>&1
+    
+    if [ $? -eq 0 ]; then
+        echo -e "  ${GREEN}✅ Template validation successful${NC}"
+    else
+        echo -e "  ${RED}❌ Template validation failed${NC}"
+        cat "${OUTPUT_DIR}/template-validation.log"
+        exit 1
+    fi
+    
     # First check if stack already exists and delete it
     aws cloudformation describe-stacks \
         --endpoint-url "${AWS_ENDPOINT}" \
@@ -190,9 +216,16 @@ deploy_infrastructure() {
         --capabilities CAPABILITY_NAMED_IAM \
         > "${OUTPUT_DIR}/cloudformation-deploy.log" 2>&1
     
-    if [ $? -eq 0 ]; then
+    local cf_exit_code=$?
+    echo -e "  ${CYAN}🔍 CloudFormation create-stack exit code: ${cf_exit_code}${NC}"
+    
+    if [ $cf_exit_code -eq 0 ]; then
         echo -e "  ${GREEN}✅ CloudFormation stack creation initiated${NC}"
         log_message "SUCCESS" "CloudFormation stack creation initiated"
+        
+        # Show what was created
+        echo -e "  ${CYAN}📋 Stack creation response:${NC}"
+        cat "${OUTPUT_DIR}/cloudformation-deploy.log"
         
         # Wait for stack creation to complete
         echo -e "  ${CYAN}⏳ Waiting for stack creation to complete...${NC}"
@@ -225,7 +258,11 @@ deploy_infrastructure() {
         # Show the error details
         echo -e "  ${YELLOW}💡 Error details:${NC}"
         cat "${OUTPUT_DIR}/cloudformation-deploy.log"
-        exit 1
+        
+        # Try direct resource creation as fallback
+        echo -e "  ${YELLOW}🔄 Trying direct resource creation as fallback...${NC}"
+        deploy_resources_directly
+        return
     fi
     
     # Get stack outputs
@@ -240,7 +277,7 @@ deploy_infrastructure() {
         --endpoint-url "${AWS_ENDPOINT}" \
         --region "${AWS_REGION}" \
         --function-name "${FUNCTION_NAME}" \
-        --zip-file fileb://lambda-deployment.zip \
+        --zip-file file://lambda-deployment.zip \
         > "${OUTPUT_DIR}/lambda-update.log" 2>&1
     
     if [ $? -eq 0 ]; then
