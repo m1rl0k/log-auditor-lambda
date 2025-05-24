@@ -144,18 +144,43 @@ jobs:
     - name: Find test results directory
       id: find-results
       run: |
-        # Use more aggressive search to find test results directory
-        RESULTS_DIR=$(find . -type d -name "test-results-*" 2>/dev/null | head -1)
-        if [ -z "$RESULTS_DIR" ]; then
-          # Look in the repository root directory
-          RESULTS_DIR=$(find $GITHUB_WORKSPACE -type d -name "test-results-*" 2>/dev/null | head -1)
+        # Enhanced results directory search
+        echo "Debugging directory structure:"
+        echo "Current directory: $(pwd)"
+        echo "GitHub workspace: $GITHUB_WORKSPACE"
+        echo "Listing top-level directories:"
+        ls -la
+        
+        # First look for the output_location.txt file which contains the paths
+        if [ -f "output_location.txt" ]; then
+          echo "Found output_location.txt, sourcing path information..."
+          source output_location.txt
+          RESULTS_DIR="$ABSOLUTE_OUTPUT_DIR"
+          echo "Using RESULTS_DIR from output_location.txt: $RESULTS_DIR"
+        else
+          echo "output_location.txt not found, using directory search..."
+          # Find the results directory with more aggressive search
+          RESULTS_DIR=$(find . -type d -name "test-results-*" 2>/dev/null | head -1)
           if [ -z "$RESULTS_DIR" ]; then
-            echo "No test results directory found!"
-            ls -la
-            echo "Current directory: $(pwd)"
-            exit 1
+            # Look in the repository root directory
+            RESULTS_DIR=$(find $GITHUB_WORKSPACE -type d -name "test-results-*" 2>/dev/null | head -1)
+            
+            # If still not found, search the entire filesystem as a last resort
+            if [ -z "$RESULTS_DIR" ]; then
+              echo "Searching the entire workspace for test results..."
+              RESULTS_DIR=$(find $GITHUB_WORKSPACE -type d -name "analysis-results" 2>/dev/null | head -1)
+              if [ -n "$RESULTS_DIR" ]; then
+                # If we found an analysis-results dir directly, use its parent
+                RESULTS_DIR=$(dirname "$RESULTS_DIR")
+                echo "Found analysis-results directory, using parent: $RESULTS_DIR"
+              else
+                echo "No test results directory found!"
+                exit 1
+              fi
+            fi
           fi
         fi
+        
         echo "results_dir=$RESULTS_DIR" >> $GITHUB_OUTPUT
         echo "Found results directory: $RESULTS_DIR"
         
@@ -392,8 +417,19 @@ jobs:
         echo "Looking for analysis file at: $ANALYSIS_FILE"
         
         if [ ! -f "$ANALYSIS_FILE" ]; then
-          echo "❌ Analysis file not found for ${{ matrix.service }}: $ANALYSIS_FILE"
-          exit 1
+          # Try a direct path as a fallback
+          if [ -f "analysis-results/${{ matrix.service }}-analysis.json" ]; then
+            echo "Using direct path to analysis file"
+            ANALYSIS_FILE="analysis-results/${{ matrix.service }}-analysis.json"
+            RESULTS_DIR="."
+          else
+            echo "❌ Analysis file not found for ${{ matrix.service }}: $ANALYSIS_FILE"
+            echo "Directory contents of possible locations:"
+            ls -la "$RESULTS_DIR" || echo "Could not access $RESULTS_DIR"
+            ls -la "$RESULTS_DIR/analysis-results" 2>/dev/null || echo "Could not access $RESULTS_DIR/analysis-results"
+            ls -la "analysis-results" 2>/dev/null || echo "Could not access analysis-results"
+            exit 1
+          fi
         fi
         
         case ${{ matrix.service }} in
