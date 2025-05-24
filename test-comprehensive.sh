@@ -162,23 +162,69 @@ deploy_infrastructure() {
     echo -e "${YELLOW}=== Deploying Infrastructure ===${NC}"
     log_message "INFO" "Deploying infrastructure"
     
-    # Deploy CloudFormation stack
+    # Deploy CloudFormation stack using create-stack for LocalStack compatibility
     echo -e "  ${CYAN}🏗️  Deploying CloudFormation stack...${NC}"
-    aws cloudformation deploy \
+    
+    # First check if stack already exists and delete it
+    aws cloudformation describe-stacks \
+        --endpoint-url "${AWS_ENDPOINT}" \
+        --region "${AWS_REGION}" \
+        --stack-name "${STACK_NAME}" > /dev/null 2>&1 && {
+        echo -e "  ${YELLOW}⚠️  Stack already exists, deleting first...${NC}"
+        aws cloudformation delete-stack \
+            --endpoint-url "${AWS_ENDPOINT}" \
+            --region "${AWS_REGION}" \
+            --stack-name "${STACK_NAME}" > "${OUTPUT_DIR}/cloudformation-delete.log" 2>&1
+        
+        # Wait for deletion
+        sleep 5
+    }
+    
+    # Create the stack
+    aws cloudformation create-stack \
         --endpoint-url "${AWS_ENDPOINT}" \
         --region "${AWS_REGION}" \
         --stack-name "${STACK_NAME}" \
-        --template-file cloudformation-template.yaml \
-        --parameter-overrides FunctionName="${FUNCTION_NAME}" \
+        --template-body file://cloudformation-template.yaml \
+        --parameters ParameterKey=FunctionName,ParameterValue="${FUNCTION_NAME}" \
         --capabilities CAPABILITY_NAMED_IAM \
         > "${OUTPUT_DIR}/cloudformation-deploy.log" 2>&1
     
     if [ $? -eq 0 ]; then
-        echo -e "  ${GREEN}✅ CloudFormation stack deployed successfully${NC}"
-        log_message "SUCCESS" "CloudFormation stack deployed successfully"
+        echo -e "  ${GREEN}✅ CloudFormation stack creation initiated${NC}"
+        log_message "SUCCESS" "CloudFormation stack creation initiated"
+        
+        # Wait for stack creation to complete
+        echo -e "  ${CYAN}⏳ Waiting for stack creation to complete...${NC}"
+        aws cloudformation wait stack-create-complete \
+            --endpoint-url "${AWS_ENDPOINT}" \
+            --region "${AWS_REGION}" \
+            --stack-name "${STACK_NAME}" \
+            > "${OUTPUT_DIR}/cloudformation-wait.log" 2>&1
+        
+        if [ $? -eq 0 ]; then
+            echo -e "  ${GREEN}✅ CloudFormation stack deployed successfully${NC}"
+            log_message "SUCCESS" "CloudFormation stack deployed successfully"
+        else
+            echo -e "  ${RED}❌ CloudFormation stack creation failed during wait${NC}"
+            log_message "ERROR" "CloudFormation stack creation failed during wait"
+            
+            # Get stack events for debugging
+            aws cloudformation describe-stack-events \
+                --endpoint-url "${AWS_ENDPOINT}" \
+                --region "${AWS_REGION}" \
+                --stack-name "${STACK_NAME}" > "${OUTPUT_DIR}/cloudformation-events.log" 2>&1
+            
+            echo -e "  ${YELLOW}💡 Check ${OUTPUT_DIR}/cloudformation-events.log for details${NC}"
+            exit 1
+        fi
     else
-        echo -e "  ${RED}❌ Failed to deploy CloudFormation stack${NC}"
-        log_message "ERROR" "Failed to deploy CloudFormation stack"
+        echo -e "  ${RED}❌ Failed to initiate CloudFormation stack creation${NC}"
+        log_message "ERROR" "Failed to initiate CloudFormation stack creation"
+        
+        # Show the error details
+        echo -e "  ${YELLOW}💡 Error details:${NC}"
+        cat "${OUTPUT_DIR}/cloudformation-deploy.log"
         exit 1
     fi
     
@@ -203,6 +249,10 @@ deploy_infrastructure() {
     else
         echo -e "  ${RED}❌ Failed to update Lambda function code${NC}"
         log_message "ERROR" "Failed to update Lambda function code"
+        
+        # Show the error details
+        echo -e "  ${YELLOW}💡 Lambda update error details:${NC}"
+        cat "${OUTPUT_DIR}/lambda-update.log"
         exit 1
     fi
     
