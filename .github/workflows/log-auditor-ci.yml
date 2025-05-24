@@ -52,15 +52,42 @@ jobs:
           localstack/localstack:latest
         
         echo "⏳ Waiting for LocalStack to be ready..."
-        # Wait for LocalStack to be ready with better error handling
-        timeout 120 bash -c '
-          until curl -s http://localhost:4566/_localstack/health | grep -q "\"running\""; do 
-            echo "Waiting for LocalStack..."
-            sleep 3
+        # Give LocalStack a moment to start
+        sleep 10
+        
+        # Wait for LocalStack to be ready with better debugging
+        timeout 180 bash -c '
+          while true; do
+            echo "Checking LocalStack health..."
+            
+            # Check if LocalStack container is running
+            if ! docker ps | grep -q localstack; then
+              echo "❌ LocalStack container is not running"
+              docker logs localstack --tail 20
+              exit 1
+            fi
+            
+            # Check health endpoint
+            health_response=$(curl -s http://localhost:4566/_localstack/health 2>/dev/null || echo "")
+            if [ -n "$health_response" ]; then
+              echo "Health response: $health_response"
+              
+              # Check if required services are running
+              if echo "$health_response" | jq -e ".services.lambda == \"running\" and .services.s3 == \"running\" and .services.cloudformation == \"running\" and .services.logs == \"running\"" >/dev/null 2>&1; then
+                echo "✅ All required services are running!"
+                break
+              fi
+            else
+              echo "No health response yet..."
+            fi
+            
+            sleep 5
           done
         ' || {
-          echo "❌ LocalStack failed to start. Checking logs..."
-          docker logs localstack
+          echo "❌ LocalStack failed to start within timeout. Checking logs..."
+          docker logs localstack --tail 50
+          echo "Container status:"
+          docker ps -a | grep localstack
           exit 1
         }
         
