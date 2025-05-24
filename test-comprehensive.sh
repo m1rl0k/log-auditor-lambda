@@ -1,570 +1,897 @@
-import json
-import logging
-import re
-import boto3
-from botocore.config import Config
-import gzip
-from datetime import datetime, timezone
-from typing import Dict, List, Any, Optional
-from urllib.parse import unquote_plus
-import os
-import uuid
+#!/bin/bash
 
-# Configure logging
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+# ==================================================================
+# Python Lambda Microservice Log Auditor - End-to-End Demo
+# ==================================================================
+# 
+# This script demonstrates the complete functionality of our Python 
+# Lambda-based log auditor running on LocalStack, including:
+# - S3 log file analysis
+# - CloudWatch log analysis  
+# - Custom condition pattern matching
+# - Security and performance monitoring
+# - Microservice-specific log analysis
+# - Results storage in S3
+# - Complete output logging for analysis
+#
+# ==================================================================
 
-# Initialize AWS clients with proper error handling
-def create_aws_clients():
-    endpoint_url = os.environ.get('AWS_ENDPOINT_URL')
-    region = os.environ.get('AWS_DEFAULT_REGION', 'us-east-1')
+set -e  # Exit on any error
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+YELLOW='\033[1;33m'
+PURPLE='\033[0;35m'
+CYAN='\033[0;36m'
+NC='\033[0m' # No Color
+
+# Configuration
+AWS_REGION="us-east-1"
+AWS_ENDPOINT="http://localhost:4566"
+STACK_NAME="log-auditor-stack"
+FUNCTION_NAME="log-auditor"
+
+# Generate unique identifiers for this demo
+DEMO_ID=$(date +%s)
+LOG_BUCKET="demo-logs-${DEMO_ID}"
+RESULTS_BUCKET="demo-results-${DEMO_ID}"
+LOG_GROUP="/aws/lambda/demo-function"
+
+# Output directories and files
+OUTPUT_DIR="test-results-${DEMO_ID}"
+TEST_LOG="${OUTPUT_DIR}/test-execution.log"
+LAMBDA_OUTPUTS_DIR="${OUTPUT_DIR}/lambda-outputs"
+ANALYSIS_RESULTS_DIR="${OUTPUT_DIR}/analysis-results"
+DEMO_SUMMARY_FILE="${OUTPUT_DIR}/demo-summary.json"
+
+# Create output directories
+mkdir -p "$OUTPUT_DIR" "$LAMBDA_OUTPUTS_DIR" "$ANALYSIS_RESULTS_DIR"
+
+# Function to log messages to both console and file
+log_message() {
+    local level="$1"
+    local message="$2"
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    echo "[$timestamp] [$level] $message" >> "$TEST_LOG"
+    echo -e "$message"
+}
+
+# Function to save test metadata
+save_test_metadata() {
+    cat > "${OUTPUT_DIR}/test-metadata.json" << EOF
+{
+    "demo_id": "${DEMO_ID}",
+    "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+    "aws_region": "${AWS_REGION}",
+    "aws_endpoint": "${AWS_ENDPOINT}",
+    "stack_name": "${STACK_NAME}",
+    "function_name": "${FUNCTION_NAME}",
+    "log_bucket": "${LOG_BUCKET}",
+    "results_bucket": "${RESULTS_BUCKET}",
+    "log_group": "${LOG_GROUP}",
+    "output_directory": "${OUTPUT_DIR}"
+}
+EOF
+}
+
+echo -e "${BLUE}"
+echo "🚀 Python Lambda Microservice Log Auditor - End-to-End Demo"
+echo "=============================================================="
+echo -e "${NC}"
+echo "Demo ID: ${DEMO_ID}"
+echo "AWS Region: ${AWS_REGION}"
+echo "AWS Endpoint: ${AWS_ENDPOINT}"
+echo "Log Bucket: ${LOG_BUCKET}"
+echo "Results Bucket: ${RESULTS_BUCKET}"
+echo "Function Name: ${FUNCTION_NAME}"
+echo "Output Directory: ${OUTPUT_DIR}"
+echo ""
+
+# Save initial metadata
+save_test_metadata
+log_message "INFO" "Demo started with ID: ${DEMO_ID}"
+
+# Function to check if LocalStack is ready
+check_localstack() {
+    echo -e "${YELLOW}=== Checking LocalStack Status ===${NC}"
+    log_message "INFO" "Checking LocalStack status"
+    local max_attempts=30
+    local attempt=1
     
-    # For LocalStack environment, use internal endpoint
-    if os.environ.get('ENVIRONMENT') == 'localstack':
-        # Use LocalStack's internal service endpoint
-        # In LocalStack Lambda environment, services are accessible via LOCALSTACK_HOSTNAME
-        localstack_host = os.environ.get('LOCALSTACK_HOSTNAME', 'localstack')
-        endpoint_url = f'http://{localstack_host}:4566'
-        logger.info(f"Using LocalStack endpoint: {endpoint_url}")
+    while [ $attempt -le $max_attempts ]; do
+        if curl -s "${AWS_ENDPOINT}/_localstack/health" > /dev/null 2>&1; then
+            local health_response=$(curl -s "${AWS_ENDPOINT}/_localstack/health")
+            echo "$health_response" > "${OUTPUT_DIR}/localstack-health.json"
+            
+            if echo "$health_response" | jq -e '(.services.s3 == "available" or .services.s3 == "running") and (.services.lambda == "available" or .services.lambda == "running") and (.services.cloudformation == "available" or .services.cloudformation == "running") and (.services.logs == "available" or .services.logs == "running")' > /dev/null 2>&1; then
+                echo -e "  ${GREEN}✅ LocalStack is ready and all services are available${NC}"
+                log_message "SUCCESS" "LocalStack is ready and all services are available"
+                return 0
+            fi
+        fi
+        
+        echo -e "  ${YELLOW}⏳ Waiting for LocalStack... (attempt $attempt/$max_attempts)${NC}"
+        log_message "INFO" "Waiting for LocalStack (attempt $attempt/$max_attempts)"
+        sleep 2
+        ((attempt++))
+    done
     
-    if endpoint_url:
-        # LocalStack configuration
-        s3_client = boto3.client(
-            's3',
-            endpoint_url=endpoint_url,
-            region_name=region,
-            aws_access_key_id='test',
-            aws_secret_access_key='test'
-        )
-        logs_client = boto3.client(
-            'logs',
-            endpoint_url=endpoint_url,
-            region_name=region,
-            aws_access_key_id='test',
-            aws_secret_access_key='test'
-        )
-    else:
-        # Production AWS configuration
-        s3_client = boto3.client('s3', region_name=region)
-        logs_client = boto3.client('logs', region_name=region)
+    echo -e "  ${RED}❌ LocalStack is not responding after $max_attempts attempts${NC}"
+    log_message "ERROR" "LocalStack is not responding after $max_attempts attempts"
+    echo -e "  ${YELLOW}💡 Please start LocalStack first:${NC}"
+    echo -e "     ${CYAN}docker run --rm -d --name localstack-demo \\${NC}"
+    echo -e "     ${CYAN}  -p 4566:4566 -p 4571:4571 \\${NC}"
+    echo -e "     ${CYAN}  -v /var/run/docker.sock:/var/run/docker.sock \\${NC}"
+    echo -e "     ${CYAN}  localstack/localstack${NC}"
+    exit 1
+}
+
+# Function to build Lambda deployment package
+build_lambda() {
+    echo -e "${YELLOW}=== Building Lambda Deployment Package ===${NC}"
+    log_message "INFO" "Building Lambda deployment package"
     
-    return s3_client, logs_client
-
-s3_client, logs_client = create_aws_clients()
-
-class MicroserviceLogAuditor:
-    def __init__(self, custom_conditions: Optional[Dict[str, Any]] = None):
-        self.audit_id = str(uuid.uuid4())
-        self.processed_logs = 0
-        self.findings = []
-        self.start_time = datetime.now(timezone.utc)
-        self.custom_conditions = custom_conditions or {}
-        
-        # Default built-in patterns (can be overridden by custom conditions)
-        self.default_patterns = {
-            "error_patterns": [
-                r'(?i)(error|exception|fatal|panic|crash|fail)',
-                r'(?i)(timeout|connection.*failed|network.*error)',
-                r'(?i)(unauthorized|forbidden|access.*denied)',
-                r'(?i)(stack.*trace|traceback)',
-                r'(?i)(out.*of.*memory|memory.*leak|segmentation.*fault)'
-            ],
-            "performance_patterns": [
-                r'(?i)duration:?\s*([0-9]+(?:\.[0-9]+)?)\s*(ms|seconds?|s)',
-                r'(?i)response.*time:?\s*([0-9]+(?:\.[0-9]+)?)',
-                r'(?i)latency:?\s*([0-9]+(?:\.[0-9]+)?)'
-            ],
-            "security_patterns": [
-                r'(?i)(login|authentication|auth).*fail',
-                r'(?i)(brute.*force|suspicious.*activity)',
-                r'(?i)(sql.*injection|xss|csrf)',
-                r'(?i)(invalid.*token|expired.*session)'
-            ],
-            "microservice_patterns": [
-                r'(?i)(service.*unavailable|service.*down)',
-                r'(?i)(circuit.*breaker|fallback.*triggered)',
-                r'(?i)(rate.*limit|throttle)',
-                r'(?i)(health.*check.*fail|readiness.*fail)',
-                r'(?i)(database.*connection.*pool|db.*pool.*exhausted)'
-            ]
-        }
-        
-        # Merge custom conditions with defaults
-        self.active_patterns = {**self.default_patterns}
-        if self.custom_conditions.get('patterns'):
-            for pattern_type, patterns in self.custom_conditions['patterns'].items():
-                if pattern_type in self.active_patterns:
-                    self.active_patterns[pattern_type].extend(patterns)
-                else:
-                    self.active_patterns[pattern_type] = patterns
-
-    def process_microservice_logs(self, source_config: Dict[str, Any]) -> Dict[str, Any]:
-        """Process logs from various sources with microservice-specific analysis"""
-        source_type = source_config.get('type', 's3')
-        
-        if source_type == 's3':
-            return self.process_s3_logs(
-                source_config['bucket_name'], 
-                source_config['object_key']
-            )
-        elif source_type == 'cloudwatch':
-            return self.process_cloudwatch_logs(
-                source_config['log_group_name'],
-                source_config.get('limit', 10000)
-            )
-        else:
-            raise ValueError(f"Unsupported source type: {source_type}")
-
-    def process_s3_logs(self, bucket_name: str, object_key: str) -> Dict[str, Any]:
-        """Process logs from S3 object with improved error handling"""
-        logger.info(f"Processing S3 object: s3://{bucket_name}/{object_key}")
-        
-        try:
-            # Get object from S3 using proper boto3 client
-            logger.info(f"Attempting to get object from bucket: {bucket_name}, key: {object_key}")
-            response = s3_client.get_object(Bucket=bucket_name, Key=object_key)
-            content = response['Body'].read()
-            
-            # Handle gzip compression
-            if object_key.endswith('.gz'):
-                content = gzip.decompress(content)
-            
-            # Decode content
-            log_content = content.decode('utf-8')
-            log_lines = log_content.strip().split('\n')
-            
-            logger.info(f"Successfully read {len(log_lines)} log lines from S3")
-            return self.analyze_log_lines(log_lines, f"s3://{bucket_name}/{object_key}")
-            
-        except Exception as e:
-            error_msg = f"Failed to process S3 object {object_key} from bucket {bucket_name}: {str(e)}"
-            logger.error(error_msg)
-            return {
-                "audit_id": self.audit_id,
-                "error": error_msg,
-                "processed_logs": 0,
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            }
-
-    def process_cloudwatch_logs(self, log_group_name: str, limit: int = 10000) -> Dict[str, Any]:
-        """Process logs from CloudWatch Log Group"""
-        logger.info(f"Processing CloudWatch logs from: {log_group_name}")
-        
-        try:
-            log_lines = []
-            
-            # Get log streams
-            streams_response = logs_client.describe_log_streams(
-                logGroupName=log_group_name,
-                orderBy='LastEventTime',
-                descending=True,
-                limit=10
-            )
-            
-            for stream in streams_response['logStreams']:
-                stream_name = stream['logStreamName']
-                
-                # Get log events
-                events_response = logs_client.get_log_events(
-                    logGroupName=log_group_name,
-                    logStreamName=stream_name,
-                    limit=limit // max(len(streams_response['logStreams']), 1)
-                )
-                
-                for event in events_response['events']:
-                    log_lines.append(event['message'])
-            
-            return self.analyze_log_lines(log_lines, f"cloudwatch:{log_group_name}")
-            
-        except Exception as e:
-            error_msg = f"Failed to process CloudWatch logs from {log_group_name}: {str(e)}"
-            logger.error(error_msg)
-            return {
-                "audit_id": self.audit_id,
-                "error": error_msg,
-                "processed_logs": 0,
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            }
-
-    def analyze_log_lines(self, log_lines: List[str], source: str) -> Dict[str, Any]:
-        """Analyze log lines with custom and default patterns"""
-        self.processed_logs += len(log_lines)
-        
-        for line_num, line in enumerate(log_lines, 1):
-            # Check all pattern types
-            for pattern_type, patterns in self.active_patterns.items():
-                self.check_patterns(line, line_num, source, pattern_type, patterns)
-            
-            # Check custom conditions
-            self.check_custom_conditions(line, line_num, source)
-            
-            # Extract structured data (JSON logs)
-            self.extract_structured_data(line, line_num, source)
-        
-        return self.generate_summary()
-
-    def check_patterns(self, line: str, line_num: int, source: str, pattern_type: str, patterns: List[str]):
-        """Check for patterns of a specific type"""
-        for pattern in patterns:
-            if re.search(pattern, line):
-                severity = self.determine_severity(pattern_type, line, pattern)
-                
-                finding = {
-                    "finding_id": str(uuid.uuid4()),
-                    "type": pattern_type.replace('_patterns', '').title(),
-                    "severity": severity,
-                    "line_number": line_num,
-                    "source": source,
-                    "message": line.strip(),
-                    "pattern_matched": pattern,
-                    "timestamp": datetime.now(timezone.utc).isoformat()
-                }
-                
-                # Add specific analysis for performance patterns
-                if pattern_type == "performance_patterns":
-                    self.add_performance_metrics(finding, line, pattern)
-                
-                self.findings.append(finding)
-                
-                if severity == "critical":
-                    logger.error(f"CRITICAL_FINDING: {json.dumps(finding)}")
-                elif severity == "high":
-                    logger.warning(f"HIGH_SEVERITY_FINDING: {json.dumps(finding)}")
-                
-                break
-
-    def check_custom_conditions(self, line: str, line_num: int, source: str):
-        """Check for user-defined custom conditions"""
-        if not self.custom_conditions.get('conditions'):
-            return
-            
-        for condition in self.custom_conditions['conditions']:
-            condition_name = condition.get('name', 'CustomCondition')
-            pattern = condition.get('pattern', '')
-            severity = condition.get('severity', 'medium')
-            description = condition.get('description', 'Custom condition matched')
-            
-            if pattern and re.search(pattern, line):
-                finding = {
-                    "finding_id": str(uuid.uuid4()),
-                    "type": "CustomCondition",
-                    "condition_name": condition_name,
-                    "severity": severity,
-                    "line_number": line_num,
-                    "source": source,
-                    "message": line.strip(),
-                    "description": description,
-                    "pattern_matched": pattern,
-                    "timestamp": datetime.now(timezone.utc).isoformat()
-                }
-                
-                self.findings.append(finding)
-                logger.info(f"CUSTOM_CONDITION_MATCHED: {json.dumps(finding)}")
-
-    def determine_severity(self, pattern_type: str, line: str, pattern: str) -> str:
-        """Determine severity based on pattern type and content"""
-        line_lower = line.lower()
-        
-        if pattern_type == "error_patterns":
-            if any(x in line_lower for x in ['fatal', 'panic', 'crash', 'critical']):
-                return "critical"
-            elif any(x in line_lower for x in ['error', 'exception', 'fail']):
-                return "high"
-            else:
-                return "medium"
-        elif pattern_type == "security_patterns":
-            return "high"  # All security issues are high severity
-        elif pattern_type == "microservice_patterns":
-            if any(x in line_lower for x in ['service down', 'circuit breaker', 'health check fail']):
-                return "critical"
-            else:
-                return "high"
-        else:
-            return "medium"
-
-    def add_performance_metrics(self, finding: Dict[str, Any], line: str, pattern: str):
-        """Add performance-specific metrics to finding"""
-        match = re.search(pattern, line)
-        if match:
-            try:
-                duration = float(match.group(1))
-                unit = match.group(2) if match.lastindex > 1 else 'ms'
-                
-                # Convert to milliseconds for comparison
-                if unit in ['s', 'seconds', 'second']:
-                    duration_ms = duration * 1000
-                else:
-                    duration_ms = duration
-                
-                finding["duration_ms"] = duration_ms
-                finding["performance_threshold_exceeded"] = duration_ms > 5000
-                
-                if duration_ms > 10000:  # >10 seconds
-                    finding["severity"] = "critical"
-                elif duration_ms > 5000:  # >5 seconds
-                    finding["severity"] = "high"
-                
-            except (ValueError, IndexError):
-                pass
-
-    def extract_structured_data(self, line: str, line_num: int, source: str):
-        """Extract data from structured logs (JSON)"""
-        try:
-            log_data = json.loads(line)
-            
-            # Extract user activity
-            if 'user' in log_data or 'user_id' in log_data:
-                user_id = log_data.get('user') or log_data.get('user_id')
-                finding = {
-                    "finding_id": str(uuid.uuid4()),
-                    "type": "UserActivity",
-                    "severity": "info",
-                    "line_number": line_num,
-                    "source": source,
-                    "user_id": user_id,
-                    "action": log_data.get('action', 'unknown'),
-                    "timestamp": log_data.get('timestamp', datetime.now(timezone.utc).isoformat())
-                }
-                self.findings.append(finding)
-            
-            # Extract error information
-            if log_data.get('level') in ['error', 'fatal', 'panic']:
-                finding = {
-                    "finding_id": str(uuid.uuid4()),
-                    "type": "StructuredError",
-                    "severity": "high" if log_data.get('level') in ['fatal', 'panic'] else "medium",
-                    "line_number": line_num,
-                    "source": source,
-                    "level": log_data.get('level'),
-                    "message": log_data.get('message', ''),
-                    "service": log_data.get('service', 'unknown'),
-                    "timestamp": log_data.get('timestamp', datetime.now(timezone.utc).isoformat())
-                }
-                self.findings.append(finding)
-                
-        except json.JSONDecodeError:
-            # Not JSON, skip structured extraction
-            pass
-
-    def store_results_in_s3(self, results: Dict[str, Any]) -> Optional[str]:
-        """Store audit results in S3 with intelligent prefixing"""
-        try:
-            results_bucket = os.environ.get('AUDIT_RESULTS_BUCKET')
-            if not results_bucket:
-                logger.info("No results bucket configured, skipping S3 storage")
-                return None
-            
-            # Generate intelligent S3 key
-            now = datetime.now(timezone.utc)
-            source_type = results.get('source_type', 'unknown')
-            
-            if source_type == 's3':
-                bucket_name = results.get('source_config', {}).get('bucket_name', 'unknown')
-                prefix = f"s3-bucket-{bucket_name}"
-            elif source_type == 'cloudwatch':
-                log_group = results.get('source_config', {}).get('log_group_name', 'unknown').replace('/', '-')
-                prefix = f"cloudwatch{log_group}"
-            else:
-                prefix = "unknown-source"
-            
-            s3_key = f"{prefix}/year={now.year}/month={now.month:02d}/day={now.day:02d}/audit-{self.audit_id}.json"
-            
-            # Upload results
-            s3_client.put_object(
-                Bucket=results_bucket,
-                Key=s3_key,
-                Body=json.dumps(results, indent=2),
-                ContentType='application/json'
-            )
-            
-            storage_location = f"s3://{results_bucket}/{s3_key}"
-            logger.info(f"Results stored at: {storage_location}")
-            return storage_location
-            
-        except Exception as e:
-            logger.error(f"Failed to store results in S3: {str(e)}")
-            return None
-
-    def generate_summary(self) -> Dict[str, Any]:
-        """Generate audit summary"""
-        end_time = datetime.now(timezone.utc)
-        processing_time_ms = int((end_time - self.start_time).total_seconds() * 1000)
-        
-        # Count findings by type
-        findings_by_type = {}
-        critical_findings = 0
-        unique_users = set()
-        error_count = 0
-        performance_alerts = 0
-        
-        for finding in self.findings:
-            finding_type = finding['type']
-            findings_by_type[finding_type] = findings_by_type.get(finding_type, 0) + 1
-            
-            if finding['severity'] in ['high', 'critical']:
-                critical_findings += 1
-            
-            if finding_type == 'UserActivity' and 'user_id' in finding:
-                unique_users.add(finding['user_id'])
-            
-            if finding_type in ['ErrorPattern', 'StructuredError', 'Error']:
-                error_count += 1
-            
-            if finding_type == 'Performance' and finding['severity'] in ['high', 'critical']:
-                performance_alerts += 1
-        
-        summary = {
-            "audit_id": self.audit_id,
-            "processed_logs": self.processed_logs,
-            "findings": self.findings,
-            "summary": {
-                "total_findings": len(self.findings),
-                "findings_by_type": findings_by_type,
-                "unique_users": len(unique_users),
-                "error_count": error_count,
-                "performance_alerts": performance_alerts
-            },
-            "processing_time_ms": processing_time_ms,
-            "critical_findings_count": critical_findings,
-            "auto_analysis_enabled": True,
-            "timestamp": end_time.isoformat()
-        }
-        
-        logger.info(f"AUDIT_SUMMARY: {json.dumps(summary['summary'])}")
-        return summary
-
-
-def lambda_handler(event, context):
-    """
-    Enhanced microservice log auditor Lambda function with custom conditions support
+    if [ ! -f "lambda_function.py" ]; then
+        echo -e "  ${RED}❌ lambda_function.py not found${NC}"
+        log_message "ERROR" "lambda_function.py not found"
+        exit 1
+    fi
     
-    Supports custom conditions and patterns via event payload:
-    {
-        "source_type": "s3",
-        "source_config": {
-            "bucket_name": "my-microservice-logs",
-            "object_key": "service-a/2024/11/26/app.log"
-        },
-        "custom_conditions": {
-            "conditions": [
-                {
-                    "name": "DatabaseConnectionFailure",
-                    "pattern": "(?i)database.*connection.*failed",
-                    "severity": "critical",
-                    "description": "Database connection failure detected"
-                }
-            ],
-            "patterns": {
-                "microservice_patterns": [
-                    "(?i)service.*mesh.*error",
-                    "(?i)kubernetes.*pod.*crashed"
-                ]
-            }
-        },
-        "output_bucket": "my-analysis-results-bucket"
+    # Create deployment package
+    echo -e "  ${CYAN}📦 Creating deployment package...${NC}"
+    zip -q lambda-deployment.zip lambda_function.py
+    
+    if [ -f "lambda-deployment.zip" ]; then
+        local size=$(ls -lh lambda-deployment.zip | awk '{print $5}')
+        echo -e "  ${GREEN}✅ Lambda package created successfully (${size})${NC}"
+        log_message "SUCCESS" "Lambda package created successfully (${size})"
+        
+        # Save package info
+        echo "{\"size\": \"${size}\", \"timestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" > "${OUTPUT_DIR}/lambda-package-info.json"
+    else
+        echo -e "  ${RED}❌ Failed to create deployment package${NC}"
+        log_message "ERROR" "Failed to create deployment package"
+        exit 1
+    fi
+}
+
+# Function to deploy infrastructure
+deploy_infrastructure() {
+    echo -e "${YELLOW}=== Deploying Infrastructure ===${NC}"
+    log_message "INFO" "Deploying infrastructure"
+    
+    # Deploy CloudFormation stack using create-stack for LocalStack compatibility
+    echo -e "  ${CYAN}🏗️  Deploying CloudFormation stack...${NC}"
+    
+    # Debug: Check CloudFormation service availability
+    echo -e "  ${CYAN}🔍 Checking CloudFormation service status...${NC}"
+    if curl -s "${AWS_ENDPOINT}/_localstack/health" | jq -r '.services.cloudformation' | grep -E "(available|running)" > /dev/null; then
+        echo -e "  ${GREEN}✅ CloudFormation service is available${NC}"
+    else
+        echo -e "  ${RED}❌ CloudFormation service not available${NC}"
+        curl -s "${AWS_ENDPOINT}/_localstack/health" | jq .
+        exit 1
+    fi
+    
+    # Debug: Validate template
+    echo -e "  ${CYAN}🔍 Validating CloudFormation template...${NC}"
+    set +e  # Temporarily disable exit on error for validation
+    aws cloudformation validate-template \
+        --endpoint-url "${AWS_ENDPOINT}" \
+        --region "${AWS_REGION}" \
+        --template-body file://cloudformation-template.yaml \
+        > "${OUTPUT_DIR}/template-validation.log" 2>&1
+    
+    local validation_exit_code=$?
+    set -e  # Re-enable exit on error
+    
+    if [ $validation_exit_code -eq 0 ]; then
+        echo -e "  ${GREEN}✅ Template validation successful${NC}"
+    else
+        echo -e "  ${YELLOW}⚠️  Template validation failed (skipping - LocalStack may not fully support validation)${NC}"
+        echo -e "  ${CYAN}📝 Validation error details (exit code: ${validation_exit_code}):${NC}"
+        cat "${OUTPUT_DIR}/template-validation.log" | head -5 || true
+    fi
+    
+    # First check if stack already exists and delete it
+    aws cloudformation describe-stacks \
+        --endpoint-url "${AWS_ENDPOINT}" \
+        --region "${AWS_REGION}" \
+        --stack-name "${STACK_NAME}" > /dev/null 2>&1 && {
+        echo -e "  ${YELLOW}⚠️  Stack already exists, deleting first...${NC}"
+        aws cloudformation delete-stack \
+            --endpoint-url "${AWS_ENDPOINT}" \
+            --region "${AWS_REGION}" \
+            --stack-name "${STACK_NAME}" > "${OUTPUT_DIR}/cloudformation-delete.log" 2>&1
+        
+        # Wait for deletion
+        sleep 5
     }
-    """
-    logger.info(f"Received event: {json.dumps(event)}")
     
-    # Debug mode - log environment variables
-    if event.get('debug'):
-        logger.info("=== DEBUG MODE: Environment Variables ===")
-        for key, value in os.environ.items():
-            logger.info(f"ENV: {key} = {value}")
-        logger.info("=== END DEBUG ===")
-        return {
-            'statusCode': 200,
-            'body': json.dumps({
-                'message': 'Debug mode - check logs for environment variables',
-                'environment_count': len(os.environ)
-            })
-        }
+    # Create the stack
+    aws cloudformation create-stack \
+        --endpoint-url "${AWS_ENDPOINT}" \
+        --region "${AWS_REGION}" \
+        --stack-name "${STACK_NAME}" \
+        --template-body file://cloudformation-template.yaml \
+        --parameters ParameterKey=FunctionName,ParameterValue="${FUNCTION_NAME}" \
+        --capabilities CAPABILITY_NAMED_IAM \
+        > "${OUTPUT_DIR}/cloudformation-deploy.log" 2>&1
     
-    # Extract custom conditions from event
-    custom_conditions = event.get('custom_conditions', {})
-    auditor = MicroserviceLogAuditor(custom_conditions=custom_conditions)
+    local cf_exit_code=$?
+    echo -e "  ${CYAN}🔍 CloudFormation create-stack exit code: ${cf_exit_code}${NC}"
     
-    # Override results bucket if specified in event
-    output_bucket = event.get('output_bucket')
-    if output_bucket:
-        os.environ['AUDIT_RESULTS_BUCKET'] = output_bucket
-    
-    try:
-        # Determine source type
-        if 'Records' in event:
-            # S3 event trigger (automatic processing)
-            for record in event['Records']:
-                if 's3' in record:
-                    bucket_name = record['s3']['bucket']['name']
-                    object_key = unquote_plus(record['s3']['object']['key'])
-                    
-                    results = auditor.process_s3_logs(bucket_name, object_key)
-                    results['source_type'] = 's3'
-                    results['source_config'] = {
-                        'bucket_name': bucket_name,
-                        'object_key': object_key
-                    }
-        else:
-            # Direct invocation with custom configuration
-            source_type = event.get('source_type')
-            source_config = event.get('source_config', {})
+    if [ $cf_exit_code -eq 0 ]; then
+        echo -e "  ${GREEN}✅ CloudFormation stack creation initiated${NC}"
+        log_message "SUCCESS" "CloudFormation stack creation initiated"
+        
+        # Show what was created
+        echo -e "  ${CYAN}📋 Stack creation response:${NC}"
+        cat "${OUTPUT_DIR}/cloudformation-deploy.log"
+        
+        # Wait for stack creation to complete
+        echo -e "  ${CYAN}⏳ Waiting for stack creation to complete...${NC}"
+        
+        # Use manual polling instead of aws cloudformation wait (LocalStack compatibility)
+        local max_wait_attempts=30
+        local wait_attempt=1
+        local stack_status=""
+        
+        while [ $wait_attempt -le $max_wait_attempts ]; do
+            echo -e "  ${CYAN}🔍 Checking stack status (attempt $wait_attempt/$max_wait_attempts)...${NC}"
             
-            if source_type == 's3':
-                bucket_name = source_config['bucket_name']
-                object_key = source_config.get('object_key') or source_config.get('prefix', '')
-                
-                results = auditor.process_s3_logs(bucket_name, object_key)
-                results['source_type'] = 's3'
-                results['source_config'] = source_config
-                
-            elif source_type == 'cloudwatch':
-                log_group_name = source_config['log_group_name']
-                
-                results = auditor.process_cloudwatch_logs(log_group_name)
-                results['source_type'] = 'cloudwatch'
-                results['source_config'] = source_config
-                
-            else:
-                raise ValueError(f"Unsupported source type: {source_type}")
+            # Get stack status
+            stack_status=$(aws cloudformation describe-stacks \
+                --endpoint-url "${AWS_ENDPOINT}" \
+                --region "${AWS_REGION}" \
+                --stack-name "${STACK_NAME}" \
+                --query 'Stacks[0].StackStatus' \
+                --output text 2>/dev/null || echo "UNKNOWN")
+            
+            echo -e "  ${CYAN}📊 Current stack status: ${stack_status}${NC}"
+            
+            case "$stack_status" in
+                "CREATE_COMPLETE")
+                    echo -e "  ${GREEN}✅ CloudFormation stack deployed successfully${NC}"
+                    log_message "SUCCESS" "CloudFormation stack deployed successfully"
+                    break
+                    ;;
+                "CREATE_FAILED"|"ROLLBACK_COMPLETE"|"DELETE_COMPLETE")
+                    echo -e "  ${RED}❌ CloudFormation stack creation failed with status: ${stack_status}${NC}"
+                    log_message "ERROR" "CloudFormation stack creation failed with status: ${stack_status}"
+                    
+                    # Get detailed stack information for debugging
+                    echo -e "  ${CYAN}🔍 Getting detailed stack information for debugging...${NC}"
+                    
+                    # Get stack events for debugging
+                    aws cloudformation describe-stack-events \
+                        --endpoint-url "${AWS_ENDPOINT}" \
+                        --region "${AWS_REGION}" \
+                        --stack-name "${STACK_NAME}" > "${OUTPUT_DIR}/cloudformation-events.log" 2>&1
+                    
+                    # Get stack resources
+                    aws cloudformation describe-stack-resources \
+                        --endpoint-url "${AWS_ENDPOINT}" \
+                        --region "${AWS_REGION}" \
+                        --stack-name "${STACK_NAME}" > "${OUTPUT_DIR}/cloudformation-resources.log" 2>&1
+                    
+                    # Show recent events in the output
+                    echo -e "  ${YELLOW}📋 Recent CloudFormation events:${NC}"
+                    aws cloudformation describe-stack-events \
+                        --endpoint-url "${AWS_ENDPOINT}" \
+                        --region "${AWS_REGION}" \
+                        --stack-name "${STACK_NAME}" \
+                        --query 'StackEvents[:5].{Time:Timestamp,Status:ResourceStatus,Reason:ResourceStatusReason,Resource:LogicalResourceId}' \
+                        --output table 2>/dev/null || echo "Could not retrieve stack events"
+                    
+                    echo -e "  ${YELLOW}💡 Check ${OUTPUT_DIR}/cloudformation-events.log and ${OUTPUT_DIR}/cloudformation-resources.log for details${NC}"
+                    exit 1
+                    ;;
+                "CREATE_IN_PROGRESS")
+                    echo -e "  ${YELLOW}⏳ Stack creation still in progress...${NC}"
+                    sleep 10
+                    ;;
+                *)
+                    echo -e "  ${YELLOW}⏳ Stack status: ${stack_status}, continuing to wait...${NC}"
+                    sleep 10
+                    ;;
+            esac
+            
+            ((wait_attempt++))
+        done
         
-        # Add custom conditions info to results
-        if custom_conditions:
-            results['custom_conditions_applied'] = True
-            results['custom_conditions_count'] = len(custom_conditions.get('conditions', []))
+        # Final check if we exited the loop without success
+        if [ "$stack_status" != "CREATE_COMPLETE" ]; then
+            echo -e "  ${RED}❌ Stack creation did not complete within expected time${NC}"
+            echo -e "  ${YELLOW}📊 Final status: ${stack_status}${NC}"
+            log_message "ERROR" "Stack creation did not complete within expected time. Final status: ${stack_status}"
+            
+            # Get stack events for debugging
+            aws cloudformation describe-stack-events \
+                --endpoint-url "${AWS_ENDPOINT}" \
+                --region "${AWS_REGION}" \
+                --stack-name "${STACK_NAME}" > "${OUTPUT_DIR}/cloudformation-events.log" 2>&1 || true
+            
+            echo -e "  ${YELLOW}💡 Check ${OUTPUT_DIR}/cloudformation-events.log for details${NC}"
+            exit 1
+        fi
+    else
+        echo -e "  ${RED}❌ Failed to initiate CloudFormation stack creation${NC}"
+        log_message "ERROR" "Failed to initiate CloudFormation stack creation"
         
-        # Store results in S3 if configured
-        storage_location = auditor.store_results_in_s3(results)
-        if storage_location:
-            results['storage_location'] = storage_location
+        # Show the error details
+        echo -e "  ${YELLOW}💡 Error details:${NC}"
+        cat "${OUTPUT_DIR}/cloudformation-deploy.log"
         
-        response = {
-            'statusCode': 200,
-            'body': json.dumps(results),
-            'headers': {
-                'Content-Type': 'application/json'
-            }
-        }
-        
-        # Safely access summary for logging
-        total_findings = results.get('summary', {}).get('total_findings', 0)
-        logger.info(f"Successfully processed {results.get('processed_logs', 0)} log lines with {total_findings} findings")
-        
-    except Exception as e:
-        logger.error(f"Error processing logs: {str(e)}", exc_info=True)
-        error_response = {
-            'audit_id': auditor.audit_id,
-            'error': str(e),
-            'processed_logs': auditor.processed_logs,
-            'timestamp': datetime.now(timezone.utc).isoformat()
-        }
-        
-        response = {
-            'statusCode': 500,
-            'body': json.dumps(error_response),
-            'headers': {
-                'Content-Type': 'application/json'
-            }
-        }
+        # Try direct resource creation as fallback
+        echo -e "  ${YELLOW}🔄 Trying direct resource creation as fallback...${NC}"
+        deploy_resources_directly
+        return
+    fi
     
-    logger.info(f"Returning response: {json.dumps(response)}")
-    return response 
+    # Get stack outputs
+    aws cloudformation describe-stacks \
+        --endpoint-url "${AWS_ENDPOINT}" \
+        --region "${AWS_REGION}" \
+        --stack-name "${STACK_NAME}" > "${OUTPUT_DIR}/stack-outputs.json" 2>/dev/null
+    
+    # Update Lambda function code
+    echo -e "  ${CYAN}🔄 Updating Lambda function code...${NC}"
+    
+    # Wait a bit for the function to be ready after CloudFormation deployment
+    sleep 5
+    
+    # First check if the function exists
+    aws lambda get-function \
+        --endpoint-url "${AWS_ENDPOINT}" \
+        --region "${AWS_REGION}" \
+        --function-name "${FUNCTION_NAME}" \
+        > "${OUTPUT_DIR}/lambda-function-check.log" 2>&1
+    
+    if [ $? -eq 0 ]; then
+        echo -e "  ${GREEN}✅ Lambda function exists, updating code...${NC}"
+        
+        aws lambda update-function-code \
+            --endpoint-url "${AWS_ENDPOINT}" \
+            --region "${AWS_REGION}" \
+            --function-name "${FUNCTION_NAME}" \
+            --zip-file fileb://lambda-deployment.zip \
+            > "${OUTPUT_DIR}/lambda-update.log" 2>&1
+        
+        if [ $? -eq 0 ]; then
+            echo -e "  ${GREEN}✅ Lambda function code updated successfully${NC}"
+            log_message "SUCCESS" "Lambda function code updated successfully"
+        else
+            echo -e "  ${RED}❌ Failed to update Lambda function code${NC}"
+            log_message "ERROR" "Failed to update Lambda function code"
+            
+            # Show the error details
+            echo -e "  ${YELLOW}💡 Lambda update error details:${NC}"
+            cat "${OUTPUT_DIR}/lambda-update.log"
+            exit 1
+        fi
+    else
+        echo -e "  ${RED}❌ Lambda function not found after CloudFormation deployment${NC}"
+        log_message "ERROR" "Lambda function not found after CloudFormation deployment"
+        
+        # Show the error details
+        echo -e "  ${YELLOW}💡 Function check error details:${NC}"
+        cat "${OUTPUT_DIR}/lambda-function-check.log"
+        exit 1
+    fi
+    
+    # Get function configuration
+    aws lambda get-function \
+        --endpoint-url "${AWS_ENDPOINT}" \
+        --region "${AWS_REGION}" \
+        --function-name "${FUNCTION_NAME}" > "${OUTPUT_DIR}/lambda-function-config.json" 2>/dev/null
+    
+    # Wait for function to be ready
+    echo -e "  ${CYAN}⏳ Waiting for Lambda function to be ready...${NC}"
+    sleep 3
+}
+
+# Function to create demo log files
+create_demo_logs() {
+    echo -e "${YELLOW}=== Creating Demo Log Files ===${NC}"
+    log_message "INFO" "Creating demo log files"
+    
+    # Create S3 bucket for logs
+    echo -e "  ${CYAN}🪣 Creating S3 bucket for demo logs...${NC}"
+    aws s3api create-bucket \
+        --bucket "${LOG_BUCKET}" \
+        --endpoint-url "${AWS_ENDPOINT}" \
+        --region "${AWS_REGION}" > "${OUTPUT_DIR}/s3-bucket-creation.log" 2>&1
+    
+    # Create realistic microservice log files
+    echo -e "  ${CYAN}📝 Using existing demo log files...${NC}"
+    
+    # Create logs directory for archival
+    mkdir -p "${OUTPUT_DIR}/input-logs"
+    
+    # Verify demo log files exist
+    if [ ! -f "demo-log-payment.log" ] || [ ! -f "demo-log-auth.log" ] || [ ! -f "demo-log-database.log" ] || [ ! -f "demo-log-api-gateway.log" ]; then
+        echo -e "  ${RED}❌ Demo log files not found! Please ensure these files exist:${NC}"
+        echo -e "     - demo-log-payment.log"
+        echo -e "     - demo-log-auth.log"
+        echo -e "     - demo-log-database.log"
+        echo -e "     - demo-log-api-gateway.log"
+        log_message "ERROR" "Demo log files not found"
+        exit 1
+    fi
+    
+    echo -e "  ${GREEN}✅ All demo log files found${NC}"
+    log_message "INFO" "Using existing demo log files"
+
+    # Copy logs to output directory for archival
+    cp demo-log-payment.log "${OUTPUT_DIR}/input-logs/"
+    cp demo-log-auth.log "${OUTPUT_DIR}/input-logs/"
+    cp demo-log-database.log "${OUTPUT_DIR}/input-logs/"
+    cp demo-log-api-gateway.log "${OUTPUT_DIR}/input-logs/"
+
+    # Upload log files to S3
+    echo -e "  ${CYAN}⬆️  Uploading log files to S3...${NC}"
+    aws s3 cp demo-log-payment.log "s3://${LOG_BUCKET}/services/payment/2024/11/26/payment-service.log" --endpoint-url "${AWS_ENDPOINT}" --quiet
+    aws s3 cp demo-log-auth.log "s3://${LOG_BUCKET}/services/auth/2024/11/26/auth-service.log" --endpoint-url "${AWS_ENDPOINT}" --quiet
+    aws s3 cp demo-log-database.log "s3://${LOG_BUCKET}/services/database/2024/11/26/database-service.log" --endpoint-url "${AWS_ENDPOINT}" --quiet
+    aws s3 cp demo-log-api-gateway.log "s3://${LOG_BUCKET}/services/api-gateway/2024/11/26/api-gateway-service.log" --endpoint-url "${AWS_ENDPOINT}" --quiet
+    
+    # List uploaded files
+    aws s3 ls "s3://${LOG_BUCKET}/" --recursive --endpoint-url "${AWS_ENDPOINT}" > "${OUTPUT_DIR}/s3-uploaded-files.log"
+    
+    echo -e "  ${GREEN}✅ Demo log files created and uploaded${NC}"
+    log_message "SUCCESS" "Demo log files created and uploaded"
+}
+
+# Function to create CloudWatch logs
+create_cloudwatch_logs() {
+    echo -e "${YELLOW}=== Creating CloudWatch Log Group ===${NC}"
+    log_message "INFO" "Creating CloudWatch log group"
+    
+    # Create log group
+    aws logs create-log-group \
+        --log-group-name "${LOG_GROUP}" \
+        --endpoint-url "${AWS_ENDPOINT}" \
+        --region "${AWS_REGION}" > "${OUTPUT_DIR}/cloudwatch-log-group-creation.log" 2>&1 || true
+    
+    # Create log stream
+    local stream_name="demo-stream-$(date +%Y%m%d%H%M%S)"
+    aws logs create-log-stream \
+        --log-group-name "${LOG_GROUP}" \
+        --log-stream-name "${stream_name}" \
+        --endpoint-url "${AWS_ENDPOINT}" \
+        --region "${AWS_REGION}" > "${OUTPUT_DIR}/cloudwatch-log-stream-creation.log" 2>&1
+    
+    # Put sample log events
+    local timestamp=$(date +%s)000
+    cat > "${OUTPUT_DIR}/sample-log-events.json" << EOF
+[
+    {
+        "timestamp": ${timestamp},
+        "message": "{\"level\":\"error\",\"service\":\"lambda-function\",\"message\":\"Memory usage exceeding 80%\",\"memory_used\":\"410MB\",\"memory_limit\":\"512MB\"}"
+    }
+]
+EOF
+    aws logs put-log-events \
+        --log-group-name "${LOG_GROUP}" \
+        --log-stream-name "${stream_name}" \
+        --log-events "file://${OUTPUT_DIR}/sample-log-events.json" \
+        --endpoint-url "${AWS_ENDPOINT}" \
+        --region "${AWS_REGION}" > "${OUTPUT_DIR}/cloudwatch-log-events.log" 2>&1
+    
+    echo -e "  ${GREEN}✅ CloudWatch logs created${NC}"
+    log_message "SUCCESS" "CloudWatch logs created"
+}
+
+# Function to run S3 log analysis
+run_s3_analysis() {
+    echo -e "${YELLOW}=== Running S3 Log Analysis Demo ===${NC}"
+    log_message "INFO" "Running S3 log analysis demo"
+    
+    # Get the results bucket from CloudFormation outputs
+    local results_bucket=$(aws cloudformation describe-stacks \
+        --endpoint-url "${AWS_ENDPOINT}" \
+        --region "${AWS_REGION}" \
+        --stack-name "${STACK_NAME}" \
+        --query 'Stacks[0].Outputs[?OutputKey==`AuditResultsBucket`].OutputValue' \
+        --output text 2>/dev/null || echo "${FUNCTION_NAME}-results-bucket")
+    
+    echo -e "  ${CYAN}📊 Using results bucket: ${results_bucket}${NC}"
+    log_message "INFO" "Using results bucket: ${results_bucket}"
+    
+    local services=("payment" "auth" "database" "api-gateway")
+    local analysis_summary=""
+    
+    for service in "${services[@]}"; do
+        echo -e "  ${CYAN}🔍 Analyzing ${service} service logs...${NC}"
+        log_message "INFO" "Analyzing ${service} service logs"
+        
+        # Create test event for this service
+        cat > "test-${service}.json" << EOF
+{
+    "source_type": "s3",
+    "source_config": {
+        "bucket_name": "${LOG_BUCKET}",
+        "object_key": "services/${service}/2024/11/26/${service}-service.log"
+    },
+    "custom_conditions": {
+        "conditions": [
+            {
+                "name": "PaymentFailure",
+                "pattern": "(?i)(payment.*failed|transaction.*declined|insufficient.*funds)",
+                "severity": "high",
+                "description": "Payment processing failure detected"
+            },
+            {
+                "name": "AuthenticationIssue", 
+                "pattern": "(?i)(authentication.*failed|invalid.*token|login.*failed)",
+                "severity": "high",
+                "description": "Authentication failure detected"
+            },
+            {
+                "name": "DatabaseIssue",
+                "pattern": "(?i)(database.*connection.*failed|connection.*timeout|pool.*exhausted)",
+                "severity": "critical", 
+                "description": "Database connectivity issues"
+            },
+            {
+                "name": "PerformanceIssue",
+                "pattern": "(?i)(slow.*query|response.*time.*[0-9]{4,}|timeout)",
+                "severity": "medium",
+                "description": "Performance degradation detected"
+            }
+        ]
+    },
+    "output_bucket": "${results_bucket}"
+}
+EOF
+        
+        # Copy test event to output directory
+        cp "test-${service}.json" "${OUTPUT_DIR}/"
+        
+        # Invoke Lambda function
+        aws lambda invoke \
+            --endpoint-url "${AWS_ENDPOINT}" \
+            --region "${AWS_REGION}" \
+            --function-name "${FUNCTION_NAME}" \
+            --payload "file://test-${service}.json" \
+            "result-${service}.json" \
+            > "${LAMBDA_OUTPUTS_DIR}/invoke-${service}.log" 2>&1
+        
+        local invoke_exit_code=$?
+        if [ $invoke_exit_code -ne 0 ]; then
+            echo -e "    ${RED}❌ Lambda invocation failed (exit code: ${invoke_exit_code})${NC}"
+            log_message "ERROR" "${service}: Lambda invocation failed (exit code: ${invoke_exit_code})"
+            echo -e "    ${YELLOW}💡 Invoke logs:${NC}"
+            cat "${LAMBDA_OUTPUTS_DIR}/invoke-${service}.log" | head -10
+            continue
+        fi
+        
+        # Parse and display results
+        if [ -f "result-${service}.json" ]; then
+            # Copy raw result to output directory
+            cp "result-${service}.json" "${LAMBDA_OUTPUTS_DIR}/"
+            
+            local status_code=$(jq -r '.statusCode' "result-${service}.json" 2>/dev/null || echo "unknown")
+            if [ "$status_code" = "200" ]; then
+                local body=$(jq -r '.body' "result-${service}.json" 2>/dev/null)
+                
+                # Save formatted analysis result
+                echo "$body" | jq . > "${ANALYSIS_RESULTS_DIR}/${service}-analysis.json" 2>/dev/null
+                
+                local processed_logs=$(echo "$body" | jq -r '.processed_logs // 0' 2>/dev/null)
+                local total_findings=$(echo "$body" | jq -r '.summary.total_findings // 0' 2>/dev/null)
+                local critical_findings=$(echo "$body" | jq -r '.critical_findings_count // 0' 2>/dev/null)
+                
+                echo -e "    ${GREEN}✅ Processed: ${processed_logs} logs, Found: ${total_findings} findings (${critical_findings} critical)${NC}"
+                log_message "SUCCESS" "${service}: Processed ${processed_logs} logs, Found ${total_findings} findings (${critical_findings} critical)"
+                
+                # Show sample findings
+                if [ "$total_findings" -gt 0 ]; then
+                    echo "$body" | jq -r '.findings[] | 
+                        if .type == "UserActivity" then 
+                            "      🔸 \(.type): \(.severity) - User \(.user_id) performed \(.action)"
+                        elif .message then 
+                            "      🔸 \(.type): \(.severity) - \(.message[:80])..."
+                        else 
+                            "      🔸 \(.type): \(.severity) - \(.level // "unknown") event detected"
+                        end' 2>/dev/null | head -2
+                    
+                    # Save detailed findings
+                    echo "$body" | jq -r '.findings[]' > "${ANALYSIS_RESULTS_DIR}/${service}-findings.json" 2>/dev/null
+                fi
+                
+                # Add to summary
+                analysis_summary+="\"${service}\": {\"processed_logs\": ${processed_logs}, \"total_findings\": ${total_findings}, \"critical_findings\": ${critical_findings}}, "
+            else
+                echo -e "    ${RED}❌ Analysis failed (status: ${status_code})${NC}"
+                log_message "ERROR" "${service}: Analysis failed (status: ${status_code})"
+            fi
+        else
+            echo -e "    ${RED}❌ No result file generated${NC}"
+            log_message "ERROR" "${service}: No result file generated"
+        fi
+        
+        echo ""
+        sleep 1
+    done
+    
+    # Save analysis summary
+    echo "{\"s3_analysis\": {${analysis_summary%*, }}}" > "${OUTPUT_DIR}/s3-analysis-summary.json"
+    
+    # Cleanup test files
+    rm -f test-*.json result-*.json
+}
+
+# Function to run CloudWatch analysis
+run_cloudwatch_analysis() {
+    echo -e "${YELLOW}=== Running CloudWatch Log Analysis Demo ===${NC}"
+    log_message "INFO" "Running CloudWatch log analysis demo"
+    
+    # Get the results bucket from CloudFormation outputs
+    local results_bucket=$(aws cloudformation describe-stacks \
+        --endpoint-url "${AWS_ENDPOINT}" \
+        --region "${AWS_REGION}" \
+        --stack-name "${STACK_NAME}" \
+        --query 'Stacks[0].Outputs[?OutputKey==`AuditResultsBucket`].OutputValue' \
+        --output text 2>/dev/null || echo "${FUNCTION_NAME}-results-bucket")
+    
+    cat > test-cloudwatch.json << EOF
+{
+    "source_type": "cloudwatch",
+    "source_config": {
+        "log_group_name": "${LOG_GROUP}",
+        "limit": 1000
+    },
+    "custom_conditions": {
+        "conditions": [
+            {
+                "name": "MemoryAlert",
+                "pattern": "(?i)(memory.*usage.*exceeding|memory.*leak|out.*of.*memory)",
+                "severity": "critical",
+                "description": "Memory usage alert detected"
+            }
+        ]
+    },
+    "output_bucket": "${results_bucket}"
+}
+EOF
+    
+    # Copy test event to output directory
+    cp test-cloudwatch.json "${OUTPUT_DIR}/"
+    
+    echo -e "  ${CYAN}🔍 Analyzing CloudWatch logs...${NC}"
+    
+    aws lambda invoke \
+        --endpoint-url "${AWS_ENDPOINT}" \
+        --region "${AWS_REGION}" \
+        --function-name "${FUNCTION_NAME}" \
+        --payload file://test-cloudwatch.json \
+        result-cloudwatch.json \
+        > "${LAMBDA_OUTPUTS_DIR}/invoke-cloudwatch.log" 2>&1
+    
+    if [ -f "result-cloudwatch.json" ]; then
+        # Copy raw result to output directory
+        cp result-cloudwatch.json "${LAMBDA_OUTPUTS_DIR}/"
+        
+        local status_code=$(jq -r '.statusCode' "result-cloudwatch.json" 2>/dev/null || echo "unknown")
+        if [ "$status_code" = "200" ]; then
+            local body=$(jq -r '.body' "result-cloudwatch.json" 2>/dev/null)
+            
+            # Save formatted analysis result
+            echo "$body" | jq . > "${ANALYSIS_RESULTS_DIR}/cloudwatch-analysis.json" 2>/dev/null
+            
+            local processed_logs=$(echo "$body" | jq -r '.processed_logs // 0' 2>/dev/null)
+            local total_findings=$(echo "$body" | jq -r '.summary.total_findings // 0' 2>/dev/null)
+            
+            echo -e "  ${GREEN}✅ CloudWatch analysis completed: ${processed_logs} logs, ${total_findings} findings${NC}"
+            log_message "SUCCESS" "CloudWatch analysis: Processed ${processed_logs} logs, Found ${total_findings} findings"
+            
+            # Save CloudWatch summary
+            echo "{\"cloudwatch_analysis\": {\"processed_logs\": ${processed_logs}, \"total_findings\": ${total_findings}}}" > "${OUTPUT_DIR}/cloudwatch-analysis-summary.json"
+        else
+            echo -e "  ${RED}❌ CloudWatch analysis failed (status: ${status_code})${NC}"
+            log_message "ERROR" "CloudWatch analysis failed (status: ${status_code})"
+        fi
+    fi
+    
+    rm -f test-cloudwatch.json result-cloudwatch.json
+    echo ""
+}
+
+# Function to show stored results
+show_results() {
+    echo -e "${YELLOW}=== Analysis Results Summary ===${NC}"
+    log_message "INFO" "Showing analysis results summary"
+    
+    # Get CloudFormation outputs to find results bucket
+    local cf_bucket=$(aws cloudformation describe-stacks \
+        --endpoint-url "${AWS_ENDPOINT}" \
+        --region "${AWS_REGION}" \
+        --stack-name "${STACK_NAME}" \
+        --query 'Stacks[0].Outputs[?OutputKey==`AuditResultsBucket`].OutputValue' \
+        --output text 2>/dev/null || echo "")
+    
+    if [ -n "$cf_bucket" ]; then
+        echo -e "  ${CYAN}📊 Results stored in S3 bucket: ${cf_bucket}${NC}"
+        log_message "INFO" "Results stored in S3 bucket: ${cf_bucket}"
+        
+        # List stored results
+        aws s3 ls "s3://${cf_bucket}/" --recursive --endpoint-url "${AWS_ENDPOINT}" > "${OUTPUT_DIR}/s3-stored-results.log" 2>/dev/null
+        local result_count=$(cat "${OUTPUT_DIR}/s3-stored-results.log" | wc -l || echo "0")
+        echo -e "  ${GREEN}✅ Total analysis result files: ${result_count}${NC}"
+        
+        if [ "$result_count" -gt 0 ]; then
+            echo -e "  ${CYAN}📁 Result files:${NC}"
+            cat "${OUTPUT_DIR}/s3-stored-results.log" | head -5 | awk '{print "    🔸 " $4 " (" $3 " bytes)"}'
+            
+            # Download a sample result file for analysis
+            local first_file=$(cat "${OUTPUT_DIR}/s3-stored-results.log" | head -1 | awk '{print $4}')
+            if [ -n "$first_file" ]; then
+                aws s3 cp "s3://${cf_bucket}/${first_file}" "${ANALYSIS_RESULTS_DIR}/sample-s3-result.json" --endpoint-url "${AWS_ENDPOINT}" --quiet 2>/dev/null
+            fi
+        fi
+    else
+        echo -e "  ${YELLOW}⚠️  Could not determine results bucket${NC}"
+        log_message "WARNING" "Could not determine results bucket"
+    fi
+    echo ""
+}
+
+# Function to generate comprehensive demo summary
+generate_demo_summary() {
+    echo -e "${YELLOW}=== Generating Demo Summary ===${NC}"
+    log_message "INFO" "Generating comprehensive demo summary"
+    
+    local end_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    
+    # Create comprehensive summary
+    cat > "$DEMO_SUMMARY_FILE" << EOF
+{
+    "demo_info": {
+        "demo_id": "${DEMO_ID}",
+        "start_time": "$(jq -r .timestamp ${OUTPUT_DIR}/test-metadata.json)",
+        "end_time": "${end_time}",
+        "duration_seconds": $(($(date +%s) - DEMO_ID)),
+        "output_directory": "${OUTPUT_DIR}"
+    },
+    "infrastructure": {
+        "localstack_endpoint": "${AWS_ENDPOINT}",
+        "aws_region": "${AWS_REGION}",
+        "stack_name": "${STACK_NAME}",
+        "function_name": "${FUNCTION_NAME}",
+        "log_bucket": "${LOG_BUCKET}",
+        "results_bucket": "${RESULTS_BUCKET}"
+    },
+    "test_execution": {
+        "lambda_function_deployed": true,
+        "s3_logs_created": true,
+        "cloudwatch_logs_created": true,
+        "s3_analysis_completed": true,
+        "cloudwatch_analysis_completed": true
+    },
+    "output_files": {
+        "test_log": "${TEST_LOG}",
+        "lambda_outputs_dir": "${LAMBDA_OUTPUTS_DIR}",
+        "analysis_results_dir": "${ANALYSIS_RESULTS_DIR}",
+        "input_logs_dir": "${OUTPUT_DIR}/input-logs"
+    },
+    "key_findings": "See individual analysis files in ${ANALYSIS_RESULTS_DIR} for detailed findings"
+}
+EOF
+
+    echo -e "  ${GREEN}✅ Demo summary saved to: ${DEMO_SUMMARY_FILE}${NC}"
+    log_message "SUCCESS" "Demo summary saved to: ${DEMO_SUMMARY_FILE}"
+}
+
+# Function to cleanup resources
+cleanup_demo() {
+    echo -e "${YELLOW}=== Cleaning Up Demo Resources ===${NC}"
+    log_message "INFO" "Cleaning up demo resources"
+    
+    # Delete S3 buckets
+    echo -e "  ${CYAN}🗑️  Deleting S3 buckets...${NC}"
+    aws s3 rb "s3://${LOG_BUCKET}" --force --endpoint-url "${AWS_ENDPOINT}" > "${OUTPUT_DIR}/cleanup-log-bucket.log" 2>&1 || true
+    
+    # Delete CloudWatch log group
+    echo -e "  ${CYAN}🗑️  Deleting CloudWatch log group...${NC}"
+    aws logs delete-log-group \
+        --log-group-name "${LOG_GROUP}" \
+        --endpoint-url "${AWS_ENDPOINT}" \
+        --region "${AWS_REGION}" > "${OUTPUT_DIR}/cleanup-cloudwatch.log" 2>&1 || true
+    
+    # Delete CloudFormation stack
+    echo -e "  ${CYAN}🗑️  Deleting CloudFormation stack...${NC}"
+    aws cloudformation delete-stack \
+        --endpoint-url "${AWS_ENDPOINT}" \
+        --region "${AWS_REGION}" \
+        --stack-name "${STACK_NAME}" > "${OUTPUT_DIR}/cleanup-cloudformation.log" 2>&1 || true
+    
+    # Wait for stack deletion
+    echo -e "  ${CYAN}⏳ Waiting for stack deletion...${NC}"
+    aws cloudformation wait stack-delete-complete \
+        --endpoint-url "${AWS_ENDPOINT}" \
+        --region "${AWS_REGION}" \
+        --stack-name "${STACK_NAME}" > "${OUTPUT_DIR}/cleanup-wait.log" 2>&1 || true
+    
+    # Clean up local files
+    rm -f lambda-deployment.zip test-*.json result-*.json
+    
+    echo -e "  ${GREEN}✅ Demo cleanup completed${NC}"
+    log_message "SUCCESS" "Demo cleanup completed"
+}
+
+# Function to display demo summary
+show_summary() {
+    echo -e "${BLUE}"
+    echo "🎯 Demo Summary"
+    echo "==============="
+    echo -e "${NC}"
+    echo -e "${GREEN}✅ Successfully demonstrated:${NC}"
+    echo -e "   🔸 Python Lambda Log Auditor deployment on LocalStack"
+    echo -e "   🔸 S3 log file analysis with custom conditions"
+    echo -e "   🔸 CloudWatch log analysis"
+    echo -e "   🔸 Multi-pattern detection (errors, security, performance, microservices)"
+    echo -e "   🔸 Custom condition matching with severity levels"
+    echo -e "   🔸 Structured and unstructured log parsing"
+    echo -e "   🔸 Results storage in S3 with intelligent prefixing"
+    echo ""
+    echo -e "${CYAN}📋 Key Features Showcased:${NC}"
+    echo -e "   • Payment failure detection"
+    echo -e "   • Authentication issue monitoring"
+    echo -e "   • Database connectivity problems"
+    echo -e "   • Performance bottleneck identification"
+    echo -e "   • Security breach detection"
+    echo -e "   • Microservice health monitoring"
+    echo ""
+    echo -e "${PURPLE}📁 Test Results Available In:${NC}"
+    echo -e "   📂 ${OUTPUT_DIR}/"
+    echo -e "   ├── 📊 demo-summary.json (comprehensive summary)"
+    echo -e "   ├── 📝 test-execution.log (full test log)"
+    echo -e "   ├── 📁 lambda-outputs/ (Lambda function responses)"
+    echo -e "   ├── 📁 analysis-results/ (parsed analysis results)"
+    echo -e "   └── 📁 input-logs/ (original log files analyzed)"
+    echo ""
+    echo -e "${PURPLE}🚀 Ready !${NC}"
+    echo ""
+    
+    log_message "SUCCESS" "Demo completed successfully. Results available in ${OUTPUT_DIR}"
+}
+
+# Main execution flow
+main() {
+    # Check prerequisites
+    check_localstack
+    
+    # Build and deploy
+    build_lambda
+    deploy_infrastructure
+    
+    # Create demo data
+    create_demo_logs
+    create_cloudwatch_logs
+    
+    # Run analyses
+    run_s3_analysis
+    run_cloudwatch_analysis
+    
+    # Show results
+    show_results
+    
+    # Generate comprehensive summary
+    generate_demo_summary
+    
+    # Automatically clean up demo resources
+    cleanup_demo
+    
+    # Show summary
+    show_summary
+}
+
+# Error handling
+trap 'echo -e "\n${RED}❌ Demo interrupted. You may need to clean up resources manually.${NC}"; log_message "ERROR" "Demo interrupted"; exit 1' INT TERM
+
+# Run the demo
+main "$@" 
