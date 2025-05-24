@@ -726,21 +726,20 @@ run_s3_analysis() {
             
             # Test a simple synchronous invocation without timeout first
             echo -e "      ${CYAN}🧪 Testing basic Lambda invocation (no timeout)...${NC}"
-            echo '{"test": true}' > simple-test.json
             
             if aws lambda invoke \
                 --endpoint-url "${AWS_ENDPOINT}" \
                 --region "${AWS_REGION}" \
                 --function-name "${FUNCTION_NAME}" \
-                --payload file://simple-test.json \
+                --payload '{"test": true}' \
                 simple-result.json > simple-invoke.log 2>&1; then
                 echo -e "        ${GREEN}✅ Basic Lambda invocation successful${NC}"
-                rm -f simple-test.json simple-result.json simple-invoke.log
+                rm -f simple-result.json simple-invoke.log
             else
                 echo -e "        ${RED}❌ Basic Lambda invocation failed${NC}"
                 echo -e "        ${CYAN}🔍 Error details:${NC}"
                 cat simple-invoke.log | head -5 | sed 's/^/          /' || echo "          No error details available"
-                rm -f simple-test.json simple-result.json simple-invoke.log
+                rm -f simple-result.json simple-invoke.log
             fi
         else
             echo -e "      ${RED}❌ Target Lambda function '${FUNCTION_NAME}' not found${NC}"
@@ -750,22 +749,19 @@ run_s3_analysis() {
         echo -e "      ${YELLOW}💡 Lambda invocation will likely fail${NC}"
     fi
     
-    cat > test-debug.json << EOF
-{
-    "debug": true,
-    "test_connection": true,
-    "environment_check": true
-}
-EOF
-    
     echo -e "  ${CYAN}🔍 Debug payload size: $(cat test-debug.json | wc -c) bytes${NC}"
     echo -e "  ${CYAN}🔍 Executing debug test: timeout 30 aws lambda invoke --endpoint-url ${AWS_ENDPOINT} --region ${AWS_REGION} --function-name ${FUNCTION_NAME} --payload file://test-debug.json result-debug.json${NC}"
+    
+    # Use direct JSON payload instead of file to avoid encoding issues in GitHub Actions
+    local debug_payload='{"debug": true, "test_connection": true, "environment_check": true}'
+    echo -e "  ${CYAN}🔍 Using direct JSON payload to avoid encoding issues${NC}"
+    echo -e "  ${CYAN}🔍 Executing debug test: timeout 30 aws lambda invoke --endpoint-url ${AWS_ENDPOINT} --region ${AWS_REGION} --function-name ${FUNCTION_NAME} --payload '${debug_payload}' result-debug.json${NC}"
     
     timeout 30 aws lambda invoke \
         --endpoint-url "${AWS_ENDPOINT}" \
         --region "${AWS_REGION}" \
         --function-name "${FUNCTION_NAME}" \
-        --payload file://test-debug.json \
+        --payload "${debug_payload}" \
         result-debug.json \
         > "${LAMBDA_OUTPUTS_DIR}/invoke-debug.log" 2>&1
     
@@ -836,53 +832,16 @@ EOF
         log_message "INFO" "Analyzing ${service} service logs"
         
         # Create test event for this service
-        cat > "test-${service}.json" << EOF
-{
-    "source_type": "s3",
-    "source_config": {
-        "bucket_name": "${LOG_BUCKET}",
-        "object_key": "services/${service}/2024/11/26/${service}-service.log"
-    },
-    "custom_conditions": {
-        "conditions": [
-            {
-                "name": "PaymentFailure",
-                "pattern": "(?i)(payment.*failed|transaction.*declined|insufficient.*funds)",
-                "severity": "high",
-                "description": "Payment processing failure detected"
-            },
-            {
-                "name": "AuthenticationIssue", 
-                "pattern": "(?i)(authentication.*failed|invalid.*token|login.*failed)",
-                "severity": "high",
-                "description": "Authentication failure detected"
-            },
-            {
-                "name": "DatabaseIssue",
-                "pattern": "(?i)(database.*connection.*failed|connection.*timeout|pool.*exhausted)",
-                "severity": "critical", 
-                "description": "Database connectivity issues"
-            },
-            {
-                "name": "PerformanceIssue",
-                "pattern": "(?i)(slow.*query|response.*time.*[0-9]{4,}|timeout)",
-                "severity": "medium",
-                "description": "Performance degradation detected"
-            }
-        ]
-    },
-    "output_bucket": "${results_bucket}"
-}
-EOF
+        local service_payload="{\"source_type\": \"s3\", \"source_config\": {\"bucket_name\": \"${LOG_BUCKET}\", \"object_key\": \"services/${service}/2024/11/26/${service}-service.log\"}, \"custom_conditions\": {\"conditions\": [{\"name\": \"PaymentFailure\", \"pattern\": \"(?i)(payment.*failed|transaction.*declined|insufficient.*funds)\", \"severity\": \"high\", \"description\": \"Payment processing failure detected\"}, {\"name\": \"AuthenticationIssue\", \"pattern\": \"(?i)(authentication.*failed|invalid.*token|login.*failed)\", \"severity\": \"high\", \"description\": \"Authentication failure detected\"}, {\"name\": \"DatabaseIssue\", \"pattern\": \"(?i)(database.*connection.*failed|connection.*timeout|pool.*exhausted)\", \"severity\": \"critical\", \"description\": \"Database connectivity issues\"}, {\"name\": \"PerformanceIssue\", \"pattern\": \"(?i)(slow.*query|response.*time.*[0-9]{4,}|timeout)\", \"severity\": \"medium\", \"description\": \"Performance degradation detected\"}]}, \"output_bucket\": \"${results_bucket}\"}"
         
-        # Copy test event to output directory
-        cp "test-${service}.json" "${OUTPUT_DIR}/"
+        # Save test event to output directory for reference
+        echo "$service_payload" | jq . > "${OUTPUT_DIR}/test-${service}.json" 2>/dev/null || echo "$service_payload" > "${OUTPUT_DIR}/test-${service}.json"
         
         # Invoke Lambda function with timeout
         echo -e "    ${CYAN}⏳ Invoking Lambda function for ${service} service...${NC}"
         
         # Debug: Show the test payload being sent
-        echo -e "    ${CYAN}🔍 Test payload size: $(cat "test-${service}.json" | wc -c) bytes${NC}"
+        echo -e "    ${CYAN}🔍 Test payload size: $(echo "$service_payload" | wc -c) bytes${NC}"
         
         # Debug: Verify the specific S3 object exists before Lambda invocation
         local s3_object_key="services/${service}/2024/11/26/${service}-service.log"
@@ -915,13 +874,13 @@ EOF
         fi
         
         # Show the actual command being executed
-        echo -e "    ${CYAN}🔍 Executing: timeout 120 aws lambda invoke --endpoint-url ${AWS_ENDPOINT} --region ${AWS_REGION} --function-name ${FUNCTION_NAME} --payload file://test-${service}.json result-${service}.json${NC}"
+        echo -e "    ${CYAN}🔍 Executing: timeout 120 aws lambda invoke --endpoint-url ${AWS_ENDPOINT} --region ${AWS_REGION} --function-name ${FUNCTION_NAME} --payload '...' result-${service}.json${NC}"
         
         timeout 120 aws lambda invoke \
             --endpoint-url "${AWS_ENDPOINT}" \
             --region "${AWS_REGION}" \
             --function-name "${FUNCTION_NAME}" \
-            --payload "file://test-${service}.json" \
+            --payload "${service_payload}" \
             "result-${service}.json" \
             > "${LAMBDA_OUTPUTS_DIR}/invoke-${service}.log" 2>&1
         
@@ -1111,29 +1070,11 @@ run_cloudwatch_analysis() {
         --query 'Stacks[0].Outputs[?OutputKey==`AuditResultsBucket`].OutputValue' \
         --output text 2>/dev/null || echo "${FUNCTION_NAME}-results-bucket")
     
-    cat > test-cloudwatch.json << EOF
-{
-    "source_type": "cloudwatch",
-    "source_config": {
-        "log_group_name": "${LOG_GROUP}",
-        "limit": 1000
-    },
-    "custom_conditions": {
-        "conditions": [
-            {
-                "name": "MemoryAlert",
-                "pattern": "(?i)(memory.*usage.*exceeding|memory.*leak|out.*of.*memory)",
-                "severity": "critical",
-                "description": "Memory usage alert detected"
-            }
-        ]
-    },
-    "output_bucket": "${results_bucket}"
-}
-EOF
+    # Create CloudWatch test payload as direct JSON
+    local cloudwatch_payload="{\"source_type\": \"cloudwatch\", \"source_config\": {\"log_group_name\": \"${LOG_GROUP}\", \"limit\": 1000}, \"custom_conditions\": {\"conditions\": [{\"name\": \"MemoryAlert\", \"pattern\": \"(?i)(memory.*usage.*exceeding|memory.*leak|out.*of.*memory)\", \"severity\": \"critical\", \"description\": \"Memory usage alert detected\"}]}, \"output_bucket\": \"${results_bucket}\"}"
     
-    # Copy test event to output directory
-    cp test-cloudwatch.json "${OUTPUT_DIR}/"
+    # Save test event to output directory for reference
+    echo "$cloudwatch_payload" | jq . > "${OUTPUT_DIR}/test-cloudwatch.json" 2>/dev/null || echo "$cloudwatch_payload" > "${OUTPUT_DIR}/test-cloudwatch.json"
     
     echo -e "  ${CYAN}🔍 Analyzing CloudWatch logs...${NC}"
     
@@ -1141,7 +1082,7 @@ EOF
         --endpoint-url "${AWS_ENDPOINT}" \
         --region "${AWS_REGION}" \
         --function-name "${FUNCTION_NAME}" \
-        --payload file://test-cloudwatch.json \
+        --payload "${cloudwatch_payload}" \
         result-cloudwatch.json \
         > "${LAMBDA_OUTPUTS_DIR}/invoke-cloudwatch.log" 2>&1
     
@@ -1289,8 +1230,7 @@ cleanup_demo() {
         --region "${AWS_REGION}" \
         --stack-name "${STACK_NAME}" > "${OUTPUT_DIR}/cleanup-wait.log" 2>&1 || true
     
-    # Clean up local files
-    rm -f lambda-deployment.zip test-*.json result-*.json
+   
     
     echo -e "  ${GREEN}✅ Demo cleanup completed${NC}"
     log_message "SUCCESS" "Demo cleanup completed"
