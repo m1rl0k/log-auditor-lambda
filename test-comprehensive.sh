@@ -177,18 +177,22 @@ deploy_infrastructure() {
     
     # Debug: Validate template
     echo -e "  ${CYAN}🔍 Validating CloudFormation template...${NC}"
+    set +e  # Temporarily disable exit on error for validation
     aws cloudformation validate-template \
         --endpoint-url "${AWS_ENDPOINT}" \
         --region "${AWS_REGION}" \
         --template-body file://cloudformation-template.yaml \
         > "${OUTPUT_DIR}/template-validation.log" 2>&1
     
-    if [ $? -eq 0 ]; then
+    local validation_exit_code=$?
+    set -e  # Re-enable exit on error
+    
+    if [ $validation_exit_code -eq 0 ]; then
         echo -e "  ${GREEN}✅ Template validation successful${NC}"
     else
         echo -e "  ${YELLOW}⚠️  Template validation failed (skipping - LocalStack may not fully support validation)${NC}"
-        echo -e "  ${CYAN}📝 Validation error details:${NC}"
-        cat "${OUTPUT_DIR}/template-validation.log" | head -5
+        echo -e "  ${CYAN}📝 Validation error details (exit code: ${validation_exit_code}):${NC}"
+        cat "${OUTPUT_DIR}/template-validation.log" | head -5 || true
     fi
     
     # First check if stack already exists and delete it
