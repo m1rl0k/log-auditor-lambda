@@ -49,6 +49,80 @@ DEMO_SUMMARY_FILE="${OUTPUT_DIR}/demo-summary.json"
 # Create output directories
 mkdir -p "$OUTPUT_DIR" "$LAMBDA_OUTPUTS_DIR" "$ANALYSIS_RESULTS_DIR"
 
+# Detect proper LocalStack endpoint for the environment
+detect_localstack_endpoint() {
+    echo -e "${CYAN}🔍 Detecting LocalStack endpoint for current environment...${NC}"
+    
+    # Check if we're in GitHub Actions
+    if [ -n "$GITHUB_ACTIONS" ]; then
+        echo -e "  ${CYAN}📍 GitHub Actions environment detected${NC}"
+        
+        # Try GitHub Actions specific endpoints
+        local github_endpoints=(
+            "http://localhost:4566"
+            "http://127.0.0.1:4566"
+            "http://host.docker.internal:4566"
+        )
+        
+        for endpoint in "${github_endpoints[@]}"; do
+            echo -e "    ${CYAN}🧪 Testing endpoint: ${endpoint}${NC}"
+            if curl -s --connect-timeout 3 --max-time 5 "${endpoint}/_localstack/health" > /dev/null 2>&1; then
+                echo -e "    ${GREEN}✅ Success! Using endpoint: ${endpoint}${NC}"
+                AWS_ENDPOINT="$endpoint"
+                return 0
+            else
+                echo -e "    ${RED}❌ Failed: ${endpoint}${NC}"
+            fi
+        done
+        
+        echo -e "    ${YELLOW}⚠️  No endpoints responding, using default: http://localhost:4566${NC}"
+        AWS_ENDPOINT="http://localhost:4566"
+    else
+        echo -e "  ${CYAN}📍 Local development environment${NC}"
+        
+        # Try local development endpoints
+        local local_endpoints=(
+            "http://localhost:4566"
+            "http://127.0.0.1:4566"
+        )
+        
+        for endpoint in "${local_endpoints[@]}"; do
+            echo -e "    ${CYAN}🧪 Testing endpoint: ${endpoint}${NC}"
+            if curl -s --connect-timeout 3 --max-time 5 "${endpoint}/_localstack/health" > /dev/null 2>&1; then
+                echo -e "    ${GREEN}✅ Success! Using endpoint: ${endpoint}${NC}"
+                AWS_ENDPOINT="$endpoint"
+                return 0
+            else
+                echo -e "    ${RED}❌ Failed: ${endpoint}${NC}"
+            fi
+        done
+        
+        echo -e "    ${YELLOW}⚠️  No endpoints responding, using default: http://localhost:4566${NC}"
+        AWS_ENDPOINT="http://localhost:4566"
+    fi
+}
+
+# Detect endpoint early
+detect_localstack_endpoint
+
+# Add debugging for GitHub Actions
+if [ -n "$GITHUB_ACTIONS" ]; then
+    echo -e "${CYAN}🔍 GitHub Actions Debug Information:${NC}"
+    echo -e "  ${CYAN}📋 Docker containers:${NC}"
+    docker ps --format "table {{.Names}}\t{{.Ports}}\t{{.Status}}" | head -10 | sed 's/^/    /'
+    
+    echo -e "  ${CYAN}🌐 Network information:${NC}"
+    docker network ls | sed 's/^/    /'
+    
+    # Try to get LocalStack container IP if running
+    if docker ps --format "{{.Names}}" | grep -q localstack; then
+        echo -e "  ${CYAN}🔍 LocalStack container details:${NC}"
+        docker inspect localstack-main --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 2>/dev/null | sed 's/^/    IP: /' || echo "    Could not get container IP"
+    fi
+    
+    echo -e "  ${CYAN}📍 Final endpoint: ${AWS_ENDPOINT}${NC}"
+fi
+
 # Function to log messages to both console and file
 log_message() {
     local level="$1"
