@@ -341,14 +341,54 @@ jobs:
         
     - name: Display ${{ matrix.service }} results
       run: |
-        # Find the results directory with more aggressive search
-        RESULTS_DIR=$(find . -type d -name "test-results-*" 2>/dev/null | head -1)
-        if [ -z "$RESULTS_DIR" ]; then
-          # Look in the repository root directory
-          RESULTS_DIR=$(find $GITHUB_WORKSPACE -type d -name "test-results-*" 2>/dev/null | head -1)
-        fi
-        ANALYSIS_FILE="$RESULTS_DIR/analysis-results/${{ matrix.service }}-analysis.json"
+        # Enhanced results directory search
+        echo "Debugging directory structure:"
+        echo "Current directory: $(pwd)"
+        echo "GitHub workspace: $GITHUB_WORKSPACE"
+        echo "Listing top-level directories:"
+        ls -la
         
+        # First look for the output_location.txt file which contains the paths
+        if [ -f "output_location.txt" ]; then
+          echo "Found output_location.txt, sourcing path information..."
+          source output_location.txt
+          RESULTS_DIR="$ABSOLUTE_OUTPUT_DIR"
+          echo "Using RESULTS_DIR from output_location.txt: $RESULTS_DIR"
+        else
+          echo "output_location.txt not found, using directory search..."
+          # Find the results directory with more aggressive search
+          RESULTS_DIR=$(find . -type d -name "test-results-*" 2>/dev/null | head -1)
+          if [ -z "$RESULTS_DIR" ]; then
+            # Look in the repository root directory
+            RESULTS_DIR=$(find $GITHUB_WORKSPACE -type d -name "test-results-*" 2>/dev/null | head -1)
+            
+            # If still not found, search the entire filesystem as a last resort
+            if [ -z "$RESULTS_DIR" ]; then
+              echo "Searching the entire workspace for test results..."
+              RESULTS_DIR=$(find $GITHUB_WORKSPACE -type d -name "analysis-results" 2>/dev/null | head -1)
+              if [ -n "$RESULTS_DIR" ]; then
+                # If we found an analysis-results dir directly, use its parent
+                RESULTS_DIR=$(dirname "$RESULTS_DIR")
+                echo "Found analysis-results directory, using parent: $RESULTS_DIR"
+              fi
+            fi
+          fi
+        fi
+        
+        # Fallback to current directory if still not found
+        if [ -z "$RESULTS_DIR" ]; then
+          echo "Warning: Could not find test results directory, trying current directory"
+          # Look for analysis-results in the current directory
+          if [ -d "analysis-results" ]; then
+            RESULTS_DIR="."
+          else
+            echo "Error: Could not locate analysis-results directory"
+            find . -type d | grep -E 'test-results|analysis' || echo "No matching directories found"
+            exit 1
+          fi
+        fi
+        
+        ANALYSIS_FILE="$RESULTS_DIR/analysis-results/${{ matrix.service }}-analysis.json"
         echo "Looking for analysis file at: $ANALYSIS_FILE"
         
         if [ ! -f "$ANALYSIS_FILE" ]; then
