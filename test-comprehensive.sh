@@ -385,6 +385,53 @@ deploy_infrastructure() {
         --region "${AWS_REGION}" \
         --function-name "${FUNCTION_NAME}" > "${OUTPUT_DIR}/lambda-function-config.json" 2>/dev/null
     
+    # Update Lambda environment variables for GitHub Actions compatibility
+    echo -e "  ${CYAN}🔧 Configuring Lambda environment variables for LocalStack...${NC}"
+    
+    # Try multiple LocalStack endpoints for different CI environments
+    local localstack_endpoints=(
+        "http://localstack:4566"
+        "http://host.docker.internal:4566"
+        "http://localhost:4566" 
+        "http://127.0.0.1:4566"
+        "http://172.17.0.1:4566"
+        "http://172.18.0.1:4566"
+    )
+    
+    # Use the AWS_ENDPOINT or fall back to defaults
+    local target_endpoint="${AWS_ENDPOINT}"
+    if [ -z "$target_endpoint" ]; then
+        target_endpoint="http://localhost:4566"
+    fi
+    
+    # Check if we're in GitHub Actions environment
+    if [ -n "$GITHUB_ACTIONS" ]; then
+        echo -e "    ${CYAN}🔍 GitHub Actions environment detected${NC}"
+        target_endpoint="http://host.docker.internal:4566"
+        github_actions_var="GITHUB_ACTIONS=true"
+    else
+        github_actions_var="GITHUB_ACTIONS=false"
+    fi
+    
+    echo -e "    ${CYAN}🔍 Setting AWS_ENDPOINT_URL to: ${target_endpoint}${NC}"
+    
+    aws lambda update-function-configuration \
+        --endpoint-url "${AWS_ENDPOINT}" \
+        --region "${AWS_REGION}" \
+        --function-name "${FUNCTION_NAME}" \
+        --environment "Variables={ENVIRONMENT=localstack,AWS_ENDPOINT_URL=${target_endpoint},LOCALSTACK_HOSTNAME=host.docker.internal,${github_actions_var},AUDIT_RESULTS_BUCKET=${FUNCTION_NAME}-results-bucket}" \
+        > "${OUTPUT_DIR}/lambda-env-update.log" 2>&1
+    
+    if [ $? -eq 0 ]; then
+        echo -e "    ${GREEN}✅ Lambda environment variables updated successfully${NC}"
+        log_message "SUCCESS" "Lambda environment variables updated"
+    else
+        echo -e "    ${YELLOW}⚠️  Failed to update environment variables (continuing anyway)${NC}"
+        log_message "WARNING" "Failed to update Lambda environment variables"
+        echo -e "    ${CYAN}🔍 Environment update error:${NC}"
+        cat "${OUTPUT_DIR}/lambda-env-update.log" | head -3 | sed 's/^/      /'
+    fi
+
     # Wait for function to be ready
     echo -e "  ${CYAN}⏳ Waiting for Lambda function to be ready...${NC}"
     sleep 3
