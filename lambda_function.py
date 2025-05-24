@@ -580,6 +580,22 @@ def lambda_handler(event, context):
     """
     logger.info(f"Received event: {json.dumps(event)}")
     
+    # Log environment and AWS client status for debugging
+    logger.info("=== Lambda Function Startup Debug ===")
+    logger.info(f"Environment: {os.environ.get('ENVIRONMENT', 'unknown')}")
+    logger.info(f"AWS_ENDPOINT_URL: {os.environ.get('AWS_ENDPOINT_URL', 'not set')}")
+    logger.info(f"GITHUB_ACTIONS: {os.environ.get('GITHUB_ACTIONS', 'false')}")
+    logger.info(f"Region: {os.environ.get('AWS_DEFAULT_REGION', 'us-east-1')}")
+    
+    # Test AWS client connectivity
+    try:
+        buckets = s3_client.list_buckets()
+        logger.info(f"✅ S3 client working - found {len(buckets.get('Buckets', []))} buckets")
+    except Exception as e:
+        logger.error(f"❌ S3 client error: {str(e)}")
+    
+    logger.info("=== End Startup Debug ===")
+    
     # Debug mode - log environment variables
     if event.get('debug'):
         logger.info("=== DEBUG MODE: Environment Variables ===")
@@ -591,7 +607,9 @@ def lambda_handler(event, context):
             'statusCode': 200,
             'body': json.dumps({
                 'message': 'Debug mode - check logs for environment variables',
-                'environment_count': len(os.environ)
+                'environment_count': len(os.environ),
+                'aws_endpoint_url': os.environ.get('AWS_ENDPOINT_URL', 'not set'),
+                'github_actions': os.environ.get('GITHUB_ACTIONS', 'false')
             })
         }
     
