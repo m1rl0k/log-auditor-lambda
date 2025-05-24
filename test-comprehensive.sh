@@ -727,11 +727,14 @@ run_s3_analysis() {
             # Test a simple synchronous invocation without timeout first
             echo -e "      ${CYAN}🧪 Testing basic Lambda invocation (no timeout)...${NC}"
             
-            if aws lambda invoke \
+            # Create a simple test payload file
+        echo '{"test": true}' > simple-test.json
+        if aws lambda invoke \
                 --endpoint-url "${AWS_ENDPOINT}" \
                 --region "${AWS_REGION}" \
                 --function-name "${FUNCTION_NAME}" \
-                --payload '{"test": true}' \
+                --cli-binary-format raw-in-base64-out \
+                --payload file://simple-test.json \
                 simple-result.json > simple-invoke.log 2>&1; then
                 echo -e "        ${GREEN}✅ Basic Lambda invocation successful${NC}"
                 rm -f simple-result.json simple-invoke.log
@@ -752,16 +755,27 @@ run_s3_analysis() {
     echo -e "  ${CYAN}🔍 Debug payload size: $(cat test-debug.json | wc -c) bytes${NC}"
     echo -e "  ${CYAN}🔍 Executing debug test: timeout 30 aws lambda invoke --endpoint-url ${AWS_ENDPOINT} --region ${AWS_REGION} --function-name ${FUNCTION_NAME} --payload file://test-debug.json result-debug.json${NC}"
     
-    # Use direct JSON payload instead of file to avoid encoding issues in GitHub Actions
-    local debug_payload='{"debug": true, "test_connection": true, "environment_check": true}'
-    echo -e "  ${CYAN}🔍 Using direct JSON payload to avoid encoding issues${NC}"
-    echo -e "  ${CYAN}🔍 Executing debug test: timeout 30 aws lambda invoke --endpoint-url ${AWS_ENDPOINT} --region ${AWS_REGION} --function-name ${FUNCTION_NAME} --payload '${debug_payload}' result-debug.json${NC}"
+    # Use properly escaped JSON payload for GitHub Actions compatibility
+    echo -e "  ${CYAN}🔍 Creating JSON payload file with proper encoding...${NC}"
+    
+    # Create a fresh payload file with proper encoding
+    cat > "test-debug.json" << EOF
+{
+  "debug": true,
+  "test_connection": true,
+  "environment_check": true
+}
+EOF
+    
+    echo -e "  ${CYAN}🔍 Using properly formatted payload file...${NC}"
+    echo -e "  ${CYAN}🔍 Executing debug test: timeout 30 aws lambda invoke --endpoint-url ${AWS_ENDPOINT} --region ${AWS_REGION} --function-name ${FUNCTION_NAME} --cli-binary-format raw-in-base64-out --payload file://test-debug.json result-debug.json${NC}"
     
     timeout 30 aws lambda invoke \
         --endpoint-url "${AWS_ENDPOINT}" \
         --region "${AWS_REGION}" \
         --function-name "${FUNCTION_NAME}" \
-        --payload '{"debug": true, "test_connection": true, "environment_check": true}' \
+        --cli-binary-format raw-in-base64-out \
+        --payload file://test-debug.json \
         result-debug.json \
         > "${LAMBDA_OUTPUTS_DIR}/invoke-debug.log" 2>&1
     
