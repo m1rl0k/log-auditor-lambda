@@ -46,22 +46,22 @@ LAMBDA_OUTPUTS_DIR="${OUTPUT_DIR}/lambda-outputs"
 ANALYSIS_RESULTS_DIR="${OUTPUT_DIR}/analysis-results"
 DEMO_SUMMARY_FILE="${OUTPUT_DIR}/demo-summary.json"
 
+# Create output directories first, before trying to write to them
+mkdir -p "$OUTPUT_DIR" "$LAMBDA_OUTPUTS_DIR" "$ANALYSIS_RESULTS_DIR"
+
 # Store the absolute path to the output directory for reference
 ABSOLUTE_OUTPUT_DIR="$(pwd)/${OUTPUT_DIR}"
-echo "Absolute output directory: ${ABSOLUTE_OUTPUT_DIR}" >> "${TEST_LOG}"
 
 # Write the path information to a discoverable file that GitHub Actions can find
 echo "OUTPUT_DIR=${OUTPUT_DIR}" > output_location.txt
 echo "ABSOLUTE_OUTPUT_DIR=${ABSOLUTE_OUTPUT_DIR}" >> output_location.txt
 echo "ANALYSIS_RESULTS_DIR=${ANALYSIS_RESULTS_DIR}" >> output_location.txt
 
-# Log environment information for debugging
+# Now that directories exist, we can write to the log
+echo "Absolute output directory: ${ABSOLUTE_OUTPUT_DIR}" >> "${TEST_LOG}"
 echo "Running in GitHub Actions: ${GITHUB_ACTIONS:-false}" >> "${TEST_LOG}"
 echo "GitHub Workspace: ${GITHUB_WORKSPACE:-not set}" >> "${TEST_LOG}"
 echo "Current directory: $(pwd)" >> "${TEST_LOG}"
-
-# Create output directories
-mkdir -p "$OUTPUT_DIR" "$LAMBDA_OUTPUTS_DIR" "$ANALYSIS_RESULTS_DIR"
 
 # Detect proper LocalStack endpoint for the environment
 detect_localstack_endpoint() {
