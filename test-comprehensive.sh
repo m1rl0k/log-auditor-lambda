@@ -105,9 +105,9 @@ check_localstack() {
             local health_response=$(curl -s "${AWS_ENDPOINT}/_localstack/health")
             echo "$health_response" > "${OUTPUT_DIR}/localstack-health.json"
             
-            if echo "$health_response" | jq -e '.services.s3 == "running" and .services.lambda == "running" and .services.cloudformation == "running"' > /dev/null 2>&1; then
-                echo -e "  ${GREEN}✅ LocalStack is ready and all services are running${NC}"
-                log_message "SUCCESS" "LocalStack is ready and all services are running"
+            if echo "$health_response" | jq -e '.services.s3 == "available" and .services.lambda == "available" and .services.cloudformation == "available" and .services.logs == "available"' > /dev/null 2>&1; then
+                echo -e "  ${GREEN}✅ LocalStack is ready and all services are available${NC}"
+                log_message "SUCCESS" "LocalStack is ready and all services are available"
                 return 0
             fi
         fi
