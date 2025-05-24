@@ -42,12 +42,14 @@ jobs:
       
     - name: Start LocalStack
       run: |
-        echo "🚀 Starting LocalStack with docker-compose..."
-        # Add S3 service to the compose services since our tests need it
-        export SERVICES=lambda,s3,cloudformation,logs,iam,sts
-        
-        # Start LocalStack using docker-compose
-        docker-compose up -d localstack
+        echo "🚀 Starting LocalStack..."
+        docker run -d --name localstack \
+          -p 4566:4566 -p 4571:4571 \
+          -e DEBUG=1 \
+          -e SERVICES=lambda,s3,cloudformation,logs \
+          -e DOCKER_HOST=unix:///var/run/docker.sock \
+          -v /var/run/docker.sock:/var/run/docker.sock \
+          localstack/localstack:latest
         
         echo "⏳ Waiting for LocalStack to be ready..."
         # Give LocalStack a moment to start
@@ -59,9 +61,9 @@ jobs:
             echo "Checking LocalStack health..."
             
             # Check if LocalStack container is running
-            if ! docker-compose ps localstack | grep -q "Up"; then
+            if ! docker ps | grep -q localstack; then
               echo "❌ LocalStack container is not running"
-              docker-compose logs localstack --tail 20
+              docker logs localstack --tail 20
               exit 1
             fi
             
@@ -71,8 +73,8 @@ jobs:
               echo "Health response: $health_response"
               
               # Check if required services are running
-              if echo "$health_response" | jq -e ".services.lambda == \"running\" and .services.s3 == \"running\" and .services.cloudformation == \"running\" and .services.logs == \"running\"" >/dev/null 2>&1; then
-                echo "✅ All required services are running!"
+              if echo "$health_response" | jq -e ".services.lambda == \"available\" and .services.s3 == \"available\" and .services.cloudformation == \"available\" and .services.logs == \"available\"" >/dev/null 2>&1; then
+                echo "✅ All required services are available!"
                 break
               fi
             else
@@ -83,9 +85,9 @@ jobs:
           done
         ' || {
           echo "❌ LocalStack failed to start within timeout. Checking logs..."
-          docker-compose logs localstack --tail 50
+          docker logs localstack --tail 50
           echo "Container status:"
-          docker-compose ps
+          docker ps -a | grep localstack
           exit 1
         }
         
@@ -272,7 +274,6 @@ jobs:
         echo "---" >> $GITHUB_STEP_SUMMARY
         echo "**✅ Comprehensive analysis completed successfully!**" >> $GITHUB_STEP_SUMMARY
         echo "Download the test results artifact for complete output including Lambda responses and metadata." >> $GITHUB_STEP_SUMMARY
-
   matrix-analysis:
     name: Individual Analysis - ${{ matrix.service }}
     runs-on: ubuntu-latest
