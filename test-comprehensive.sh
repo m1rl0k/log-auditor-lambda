@@ -233,24 +233,68 @@ deploy_infrastructure() {
         
         # Wait for stack creation to complete
         echo -e "  ${CYAN}⏳ Waiting for stack creation to complete...${NC}"
-        aws cloudformation wait stack-create-complete \
-            --endpoint-url "${AWS_ENDPOINT}" \
-            --region "${AWS_REGION}" \
-            --stack-name "${STACK_NAME}" \
-            > "${OUTPUT_DIR}/cloudformation-wait.log" 2>&1
         
-        if [ $? -eq 0 ]; then
-            echo -e "  ${GREEN}✅ CloudFormation stack deployed successfully${NC}"
-            log_message "SUCCESS" "CloudFormation stack deployed successfully"
-        else
-            echo -e "  ${RED}❌ CloudFormation stack creation failed during wait${NC}"
-            log_message "ERROR" "CloudFormation stack creation failed during wait"
+        # Use manual polling instead of aws cloudformation wait (LocalStack compatibility)
+        local max_wait_attempts=30
+        local wait_attempt=1
+        local stack_status=""
+        
+        while [ $wait_attempt -le $max_wait_attempts ]; do
+            echo -e "  ${CYAN}🔍 Checking stack status (attempt $wait_attempt/$max_wait_attempts)...${NC}"
+            
+            # Get stack status
+            stack_status=$(aws cloudformation describe-stacks \
+                --endpoint-url "${AWS_ENDPOINT}" \
+                --region "${AWS_REGION}" \
+                --stack-name "${STACK_NAME}" \
+                --query 'Stacks[0].StackStatus' \
+                --output text 2>/dev/null || echo "UNKNOWN")
+            
+            echo -e "  ${CYAN}📊 Current stack status: ${stack_status}${NC}"
+            
+            case "$stack_status" in
+                "CREATE_COMPLETE")
+                    echo -e "  ${GREEN}✅ CloudFormation stack deployed successfully${NC}"
+                    log_message "SUCCESS" "CloudFormation stack deployed successfully"
+                    break
+                    ;;
+                "CREATE_FAILED"|"ROLLBACK_COMPLETE"|"DELETE_COMPLETE")
+                    echo -e "  ${RED}❌ CloudFormation stack creation failed with status: ${stack_status}${NC}"
+                    log_message "ERROR" "CloudFormation stack creation failed with status: ${stack_status}"
+                    
+                    # Get stack events for debugging
+                    aws cloudformation describe-stack-events \
+                        --endpoint-url "${AWS_ENDPOINT}" \
+                        --region "${AWS_REGION}" \
+                        --stack-name "${STACK_NAME}" > "${OUTPUT_DIR}/cloudformation-events.log" 2>&1
+                    
+                    echo -e "  ${YELLOW}💡 Check ${OUTPUT_DIR}/cloudformation-events.log for details${NC}"
+                    exit 1
+                    ;;
+                "CREATE_IN_PROGRESS")
+                    echo -e "  ${YELLOW}⏳ Stack creation still in progress...${NC}"
+                    sleep 10
+                    ;;
+                *)
+                    echo -e "  ${YELLOW}⏳ Stack status: ${stack_status}, continuing to wait...${NC}"
+                    sleep 10
+                    ;;
+            esac
+            
+            ((wait_attempt++))
+        done
+        
+        # Final check if we exited the loop without success
+        if [ "$stack_status" != "CREATE_COMPLETE" ]; then
+            echo -e "  ${RED}❌ Stack creation did not complete within expected time${NC}"
+            echo -e "  ${YELLOW}📊 Final status: ${stack_status}${NC}"
+            log_message "ERROR" "Stack creation did not complete within expected time. Final status: ${stack_status}"
             
             # Get stack events for debugging
             aws cloudformation describe-stack-events \
                 --endpoint-url "${AWS_ENDPOINT}" \
                 --region "${AWS_REGION}" \
-                --stack-name "${STACK_NAME}" > "${OUTPUT_DIR}/cloudformation-events.log" 2>&1
+                --stack-name "${STACK_NAME}" > "${OUTPUT_DIR}/cloudformation-events.log" 2>&1 || true
             
             echo -e "  ${YELLOW}💡 Check ${OUTPUT_DIR}/cloudformation-events.log for details${NC}"
             exit 1
