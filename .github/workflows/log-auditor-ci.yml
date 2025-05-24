@@ -42,7 +42,7 @@ jobs:
       
     - name: Start LocalStack
       run: |
-        echo "🚀 Starting LocalStack..."
+        echo "Starting LocalStack..."
         docker run -d --name localstack \
           -p 4566:4566 -p 4571:4571 \
           -e DEBUG=1 \
@@ -51,7 +51,7 @@ jobs:
           -v /var/run/docker.sock:/var/run/docker.sock \
           localstack/localstack:latest
         
-        echo "⏳ Waiting for LocalStack to be ready..."
+        echo "Waiting for LocalStack to be ready..."
         # Give LocalStack a moment to start
         sleep 10
         
@@ -62,7 +62,7 @@ jobs:
             
             # Check if LocalStack container is running
             if ! docker ps | grep -q localstack; then
-              echo "❌ LocalStack container is not running"
+              echo "LocalStack container is not running"
               docker logs localstack --tail 20
               exit 1
             fi
@@ -74,7 +74,7 @@ jobs:
               
               # Check if required services are running
               if echo "$health_response" | jq -e ".services.lambda == \"available\" and .services.s3 == \"available\" and .services.cloudformation == \"available\" and .services.logs == \"available\"" >/dev/null 2>&1; then
-                echo "✅ All required services are available!"
+                echo "All required services are available!"
                 break
               fi
             else
@@ -84,39 +84,39 @@ jobs:
             sleep 5
           done
         ' || {
-          echo "❌ LocalStack failed to start within timeout. Checking logs..."
+          echo "LocalStack failed to start within timeout. Checking logs..."
           docker logs localstack --tail 50
           echo "Container status:"
           docker ps -a | grep localstack
           exit 1
         }
         
-        echo "✅ LocalStack is ready!"
+        echo "LocalStack is ready!"
         curl -s http://localhost:4566/_localstack/health | jq .
       
     - name: Run comprehensive test
       run: |
-        echo "🚀 Starting comprehensive log analysis test..."
+        echo "Starting comprehensive log analysis test..."
         ./test-comprehensive.sh
-        echo "✅ Test completed!"
+        echo "Test completed!"
         
     - name: Find test results directory
       id: find-results
       run: |
         RESULTS_DIR=$(find . -name "test-results-*" -type d | head -1)
         if [ -z "$RESULTS_DIR" ]; then
-          echo "❌ No test results directory found!"
+          echo "No test results directory found!"
           exit 1
         fi
         echo "results_dir=$RESULTS_DIR" >> $GITHUB_OUTPUT
-        echo "📁 Found results directory: $RESULTS_DIR"
+        echo "Found results directory: $RESULTS_DIR"
         
     - name: Parse and display results
       run: |
         RESULTS_DIR="${{ steps.find-results.outputs.results_dir }}"
         ANALYSIS_DIR="$RESULTS_DIR/analysis-results"
         
-        echo "# 🔍 Log Auditor Comprehensive Analysis Results" >> $GITHUB_STEP_SUMMARY
+        echo "# Log Auditor Comprehensive Analysis Results" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "**Test Results Directory:** \`$RESULTS_DIR\`" >> $GITHUB_STEP_SUMMARY
         echo "**Timestamp:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_STEP_SUMMARY
@@ -124,7 +124,7 @@ jobs:
         echo "" >> $GITHUB_STEP_SUMMARY
         
         # Create summary table
-        echo "## 📊 Summary Overview" >> $GITHUB_STEP_SUMMARY
+        echo "## Summary Overview" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "| Service | Logs | Findings | Critical | Users | Errors |" >> $GITHUB_STEP_SUMMARY
         echo "|---------|------|----------|----------|-------|--------|" >> $GITHUB_STEP_SUMMARY
@@ -141,11 +141,11 @@ jobs:
             service=$(basename "$result_file" | sed 's/-analysis.json//')
             
             case $service in
-              payment) display="💳 Payment" ;;
-              auth) display="🔐 Auth" ;;
-              database) display="🗄️ Database" ;;
-              api-gateway) display="🌐 API Gateway" ;;
-              *) display="📋 $service" ;;
+              payment) display="Payment" ;;
+              auth) display="Auth" ;;
+              database) display="Database" ;;
+              api-gateway) display="API Gateway" ;;
+              *) display="$service" ;;
             esac
             
             logs=$(jq -r '.processed_logs // 0' "$result_file")
@@ -172,7 +172,7 @@ jobs:
         RESULTS_DIR="${{ steps.find-results.outputs.results_dir }}"
         ANALYSIS_DIR="$RESULTS_DIR/analysis-results"
         
-        echo "## 📋 Detailed Service Analysis" >> $GITHUB_STEP_SUMMARY
+        echo "## Detailed Service Analysis" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         
         # Process each service result in detail
@@ -181,11 +181,11 @@ jobs:
             service=$(basename "$result_file" | sed 's/-analysis.json//')
             
             case $service in
-              payment) display="💳 Payment Service" ;;
-              auth) display="🔐 Authentication Service" ;;
-              database) display="🗄️ Database Service" ;;
-              api-gateway) display="🌐 API Gateway Service" ;;
-              *) display="📋 $service Service" ;;
+              payment) display="Payment" ;;
+              auth) display="Auth" ;;
+              database) display="Database" ;;
+              api-gateway) display="API Gateway" ;;
+              *) display="$service" ;;
             esac
             
             echo "### $display" >> $GITHUB_STEP_SUMMARY
@@ -200,15 +200,15 @@ jobs:
             
             echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
             echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
-            echo "| 📊 Total Logs Processed | $logs |" >> $GITHUB_STEP_SUMMARY
-            echo "| 🔍 Total Findings | $findings |" >> $GITHUB_STEP_SUMMARY
-            echo "| ⚠️ Critical Findings | $critical |" >> $GITHUB_STEP_SUMMARY
-            echo "| 👥 Unique Users | $users |" >> $GITHUB_STEP_SUMMARY
-            echo "| ❌ Error Count | $errors |" >> $GITHUB_STEP_SUMMARY
+            echo "| Total Logs Processed | $logs |" >> $GITHUB_STEP_SUMMARY
+            echo "| Total Findings | $findings |" >> $GITHUB_STEP_SUMMARY
+            echo "| Critical Findings | $critical |" >> $GITHUB_STEP_SUMMARY
+            echo "| Unique Users | $users |" >> $GITHUB_STEP_SUMMARY
+            echo "| Error Count | $errors |" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             
             # Show findings by type
-            echo "#### 📊 Findings by Type" >> $GITHUB_STEP_SUMMARY
+            echo "#### Findings by Type" >> $GITHUB_STEP_SUMMARY
             echo "| Type | Count |" >> $GITHUB_STEP_SUMMARY
             echo "|------|-------|" >> $GITHUB_STEP_SUMMARY
             jq -r '.summary.findings_by_type // {} | to_entries | sort_by(.value) | reverse | .[] | "| \(.key) | \(.value) |"' "$result_file" >> $GITHUB_STEP_SUMMARY || echo "| No findings | 0 |" >> $GITHUB_STEP_SUMMARY
@@ -217,7 +217,7 @@ jobs:
             # Show sample critical findings
             critical_count=$(jq -r '.findings | map(select(.severity == "critical")) | length' "$result_file")
             if [ "$critical_count" -gt 0 ]; then
-              echo "#### 🚨 Sample Critical Findings" >> $GITHUB_STEP_SUMMARY
+              echo "#### Sample Critical Findings" >> $GITHUB_STEP_SUMMARY
               echo "\`\`\`json" >> $GITHUB_STEP_SUMMARY
               jq -r '.findings | map(select(.severity == "critical")) | limit(3; .[])' "$result_file" >> $GITHUB_STEP_SUMMARY
               echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
@@ -227,7 +227,7 @@ jobs:
             # Show sample user activities  
             user_activity_count=$(jq -r '.findings | map(select(.type == "UserActivity")) | length' "$result_file")
             if [ "$user_activity_count" -gt 0 ]; then
-              echo "#### 👤 Sample User Activities" >> $GITHUB_STEP_SUMMARY
+              echo "#### Sample User Activities" >> $GITHUB_STEP_SUMMARY
               echo "\`\`\`json" >> $GITHUB_STEP_SUMMARY
               jq -r '.findings | map(select(.type == "UserActivity")) | limit(3; .[])' "$result_file" >> $GITHUB_STEP_SUMMARY
               echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
@@ -252,7 +252,7 @@ jobs:
         RESULTS_DIR="${{ steps.find-results.outputs.results_dir }}"
         ANALYSIS_DIR="$RESULTS_DIR/analysis-results"
         
-        echo "## 📄 Raw JSON Results" >> $GITHUB_STEP_SUMMARY
+        echo "## Raw JSON Results" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "<details>" >> $GITHUB_STEP_SUMMARY
         echo "<summary>Click to expand raw analysis results</summary>" >> $GITHUB_STEP_SUMMARY
@@ -272,7 +272,7 @@ jobs:
         echo "</details>" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "---" >> $GITHUB_STEP_SUMMARY
-        echo "**✅ Comprehensive analysis completed successfully!**" >> $GITHUB_STEP_SUMMARY
+        echo "**Comprehensive analysis completed successfully!**" >> $GITHUB_STEP_SUMMARY
         echo "Download the test results artifact for complete output including Lambda responses and metadata." >> $GITHUB_STEP_SUMMARY
   matrix-analysis:
     name: Individual Analysis - ${{ matrix.service }}
@@ -303,10 +303,10 @@ jobs:
         fi
         
         case ${{ matrix.service }} in
-          payment) display="💳 Payment Service" ;;
-          auth) display="🔐 Authentication Service" ;;
-          database) display="🗄️ Database Service" ;;
-          api-gateway) display="🌐 API Gateway Service" ;;
+          payment) display="Payment" ;;
+          auth) display="Auth" ;;
+          database) display="Database" ;;
+          api-gateway) display="API Gateway" ;;
         esac
         
         echo "# $display Analysis Results" >> $GITHUB_STEP_SUMMARY
@@ -321,15 +321,15 @@ jobs:
         
         echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
         echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
-        echo "| 📊 Total Logs Processed | $logs |" >> $GITHUB_STEP_SUMMARY
-        echo "| 🔍 Total Findings | $findings |" >> $GITHUB_STEP_SUMMARY
-        echo "| ⚠️ Critical Findings | $critical |" >> $GITHUB_STEP_SUMMARY
-        echo "| 👥 Unique Users | $users |" >> $GITHUB_STEP_SUMMARY
-        echo "| ❌ Error Count | $errors |" >> $GITHUB_STEP_SUMMARY
+        echo "| Total Logs Processed | $logs |" >> $GITHUB_STEP_SUMMARY
+        echo "| Total Findings | $findings |" >> $GITHUB_STEP_SUMMARY
+        echo "| Critical Findings | $critical |" >> $GITHUB_STEP_SUMMARY
+        echo "| Unique Users | $users |" >> $GITHUB_STEP_SUMMARY
+        echo "| Error Count | $errors |" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         
         # Complete JSON output
-        echo "## 📄 Complete Analysis Results" >> $GITHUB_STEP_SUMMARY
+        echo "## Complete Analysis Results" >> $GITHUB_STEP_SUMMARY
         echo "\`\`\`json" >> $GITHUB_STEP_SUMMARY
         cat "$ANALYSIS_FILE" >> $GITHUB_STEP_SUMMARY
         echo "\`\`\`" >> $GITHUB_STEP_SUMMARY 
