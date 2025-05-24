@@ -551,8 +551,9 @@ EOF
         # Copy test event to output directory
         cp "test-${service}.json" "${OUTPUT_DIR}/"
         
-        # Invoke Lambda function
-        aws lambda invoke \
+        # Invoke Lambda function with timeout
+        echo -e "    ${CYAN}⏳ Invoking Lambda function for ${service} service...${NC}"
+        timeout 120 aws lambda invoke \
             --endpoint-url "${AWS_ENDPOINT}" \
             --region "${AWS_REGION}" \
             --function-name "${FUNCTION_NAME}" \
@@ -561,13 +562,23 @@ EOF
             > "${LAMBDA_OUTPUTS_DIR}/invoke-${service}.log" 2>&1
         
         local invoke_exit_code=$?
-        if [ $invoke_exit_code -ne 0 ]; then
+        
+        # Check for timeout or other failures
+        if [ $invoke_exit_code -eq 124 ]; then
+            echo -e "    ${RED}❌ Lambda invocation timed out after 120 seconds${NC}"
+            log_message "ERROR" "${service}: Lambda invocation timed out after 120 seconds"
+            echo -e "    ${YELLOW}💡 This might indicate LocalStack Lambda execution issues${NC}"
+            continue
+        elif [ $invoke_exit_code -ne 0 ]; then
             echo -e "    ${RED}❌ Lambda invocation failed (exit code: ${invoke_exit_code})${NC}"
             log_message "ERROR" "${service}: Lambda invocation failed (exit code: ${invoke_exit_code})"
             echo -e "    ${YELLOW}💡 Invoke logs:${NC}"
             cat "${LAMBDA_OUTPUTS_DIR}/invoke-${service}.log" | head -10
+            echo -e "    ${YELLOW}💡 Check Lambda function logs in LocalStack${NC}"
             continue
         fi
+        
+        echo -e "    ${GREEN}✅ Lambda invocation completed${NC}"
         
         # Parse and display results
         if [ -f "result-${service}.json" ]; then
