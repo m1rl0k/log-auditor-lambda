@@ -654,6 +654,38 @@ run_s3_analysis() {
     
     # First, test Lambda function with a simple debug payload
     echo -e "  ${CYAN}🧪 Testing Lambda function connectivity...${NC}"
+    
+    # Pre-invocation debugging
+    echo -e "  ${CYAN}🔍 Pre-invocation debugging:${NC}"
+    echo -e "    ${CYAN}📍 Using endpoint: ${AWS_ENDPOINT}${NC}"
+    echo -e "    ${CYAN}🌐 Testing endpoint connectivity:${NC}"
+    
+    # Test the endpoint directly
+    if curl -s --connect-timeout 5 --max-time 10 "${AWS_ENDPOINT}/_localstack/health" > /dev/null 2>&1; then
+        echo -e "      ${GREEN}✅ LocalStack health endpoint accessible${NC}"
+        health_status=$(curl -s "${AWS_ENDPOINT}/_localstack/health" | jq -r '.services.lambda // "unknown"')
+        echo -e "      ${CYAN}🔧 Lambda service status: ${health_status}${NC}"
+    else
+        echo -e "      ${RED}❌ LocalStack health endpoint not accessible${NC}"
+        echo -e "      ${YELLOW}💡 This may cause Lambda invocation to fail${NC}"
+    fi
+    
+    # Test AWS CLI connectivity
+    echo -e "    ${CYAN}🔧 Testing AWS CLI connectivity:${NC}"
+    if aws lambda list-functions --endpoint-url "${AWS_ENDPOINT}" --region "${AWS_REGION}" --max-items 1 > /dev/null 2>&1; then
+        echo -e "      ${GREEN}✅ AWS CLI can connect to Lambda service${NC}"
+        
+        # Check if our function exists
+        if aws lambda get-function --endpoint-url "${AWS_ENDPOINT}" --region "${AWS_REGION}" --function-name "${FUNCTION_NAME}" > /dev/null 2>&1; then
+            echo -e "      ${GREEN}✅ Target Lambda function '${FUNCTION_NAME}' exists${NC}"
+        else
+            echo -e "      ${RED}❌ Target Lambda function '${FUNCTION_NAME}' not found${NC}"
+        fi
+    else
+        echo -e "      ${RED}❌ AWS CLI cannot connect to Lambda service${NC}"
+        echo -e "      ${YELLOW}💡 Lambda invocation will likely fail${NC}"
+    fi
+    
     cat > test-debug.json << EOF
 {
     "debug": true,
@@ -836,13 +868,62 @@ EOF
         if [ -f "${LAMBDA_OUTPUTS_DIR}/invoke-${service}.log" ]; then
             echo -e "    ${CYAN}🔍 Invocation log size: $(cat "${LAMBDA_OUTPUTS_DIR}/invoke-${service}.log" | wc -c) bytes${NC}"
             if [ -s "${LAMBDA_OUTPUTS_DIR}/invoke-${service}.log" ]; then
-                echo -e "    ${CYAN}🔍 First few lines of invocation log:${NC}"
-                head -3 "${LAMBDA_OUTPUTS_DIR}/invoke-${service}.log" | sed 's/^/      /'
+                echo -e "    ${CYAN}🔍 Invocation log contents:${NC}"
+                cat "${LAMBDA_OUTPUTS_DIR}/invoke-${service}.log" | sed 's/^/      /'
             fi
         fi
         
-        # Check for timeout or other failures
-        if [ $invoke_exit_code -eq 124 ]; then
+        # Handle specific exit codes
+        if [ $invoke_exit_code -eq 255 ]; then
+            echo -e "    ${RED}❌ Lambda invocation failed with exit code 255${NC}"
+            echo -e "    ${YELLOW}💡 Exit code 255 usually indicates AWS CLI connection issues${NC}"
+            log_message "ERROR" "${service}: Lambda invocation failed with exit code 255"
+            
+            # Additional debugging for exit code 255
+            echo -e "    ${CYAN}🔍 Additional debugging for exit code 255:${NC}"
+            
+            # Test direct endpoint connectivity
+            echo -e "      ${CYAN}🌐 Testing direct endpoint connectivity:${NC}"
+            if curl -s --connect-timeout 3 --max-time 5 "${AWS_ENDPOINT}/_localstack/health" >/dev/null 2>&1; then
+                echo -e "        ${GREEN}✅ LocalStack health endpoint reachable${NC}"
+            else
+                echo -e "        ${RED}❌ LocalStack health endpoint unreachable${NC}"
+            fi
+            
+            # Test AWS CLI basic connectivity
+            echo -e "      ${CYAN}🔧 Testing AWS CLI basic connectivity:${NC}"
+            if aws --endpoint-url "${AWS_ENDPOINT}" --region "${AWS_REGION}" sts get-caller-identity >/dev/null 2>&1; then
+                echo -e "        ${GREEN}✅ AWS CLI can connect to STS${NC}"
+            else
+                echo -e "        ${RED}❌ AWS CLI cannot connect to STS${NC}"
+            fi
+            
+            # Show environment variables
+            echo -e "      ${CYAN}📋 Current AWS environment:${NC}"
+            echo -e "        ${CYAN}AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-'not set'}${NC}"
+            echo -e "        ${CYAN}AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-'not set'}${NC}"
+            echo -e "        ${CYAN}AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-'not set'}${NC}"
+            echo -e "        ${CYAN}AWS_ENDPOINT_URL: ${AWS_ENDPOINT_URL:-'not set'}${NC}"
+            echo -e "        ${CYAN}Script AWS_ENDPOINT: ${AWS_ENDPOINT}${NC}"
+            
+            # Check if there's a network/container issue
+            if [ -n "$GITHUB_ACTIONS" ]; then
+                echo -e "      ${CYAN}🐳 GitHub Actions container debugging:${NC}"
+                echo -e "        ${CYAN}Docker containers:${NC}"
+                docker ps --format "{{.Names}} {{.Ports}} {{.Status}}" | grep localstack | sed 's/^/          /' || echo "          No LocalStack containers found"
+                
+                echo -e "        ${CYAN}Network connectivity test:${NC}"
+                for test_endpoint in "http://localhost:4566" "http://127.0.0.1:4566" "http://host.docker.internal:4566"; do
+                    if curl -s --connect-timeout 2 --max-time 3 "${test_endpoint}/_localstack/health" >/dev/null 2>&1; then
+                        echo -e "          ${GREEN}✅ ${test_endpoint} reachable${NC}"
+                    else
+                        echo -e "          ${RED}❌ ${test_endpoint} unreachable${NC}"
+                    fi
+                done
+            fi
+            
+            continue
+        elif [ $invoke_exit_code -eq 124 ]; then
             echo -e "    ${RED}❌ Lambda invocation timed out after 120 seconds${NC}"
             log_message "ERROR" "${service}: Lambda invocation timed out after 120 seconds"
             echo -e "    ${YELLOW}💡 This might indicate LocalStack Lambda execution issues${NC}"
