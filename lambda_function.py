@@ -19,6 +19,11 @@ def create_aws_clients():
     endpoint_url = os.environ.get('AWS_ENDPOINT_URL')
     region = os.environ.get('AWS_DEFAULT_REGION', 'us-east-1')
     
+    logger.info(f"=== AWS Client Creation Debug ===")
+    logger.info(f"Initial endpoint_url from env: {endpoint_url}")
+    logger.info(f"Region: {region}")
+    logger.info(f"Environment: {os.environ.get('ENVIRONMENT')}")
+    
     # For LocalStack environment, use internal endpoint
     if os.environ.get('ENVIRONMENT') == 'localstack':
         # Try multiple LocalStack endpoint patterns for container networking
@@ -26,43 +31,87 @@ def create_aws_clients():
             'http://localstack:4566',
             'http://host.docker.internal:4566', 
             'http://localhost:4566',
+            'http://127.0.0.1:4566',
             'http://172.17.0.1:4566',  # Common Docker bridge IP
+            'http://172.18.0.1:4566',  # Another common Docker bridge IP
+            'http://10.0.2.15:4566',   # VirtualBox/VM networking
             endpoint_url  # fallback to provided endpoint
         ]
         
+        # Also try to get container IP from environment if available
+        container_ip = os.environ.get('LOCALSTACK_CONTAINER_IP')
+        if container_ip:
+            localstack_endpoints.insert(0, f'http://{container_ip}:4566')
+            logger.info(f"Added container IP endpoint: http://{container_ip}:4566")
+        
+        logger.info(f"Testing {len(localstack_endpoints)} LocalStack endpoints...")
+        
         # Try each endpoint until one works
         working_endpoint = None
-        for test_endpoint in localstack_endpoints:
-            if test_endpoint:
-                logger.info(f"Testing LocalStack endpoint: {test_endpoint}")
-                try:
-                    # Quick test by creating a client and listing S3 buckets
-                    test_s3 = boto3.client(
-                        's3',
-                        endpoint_url=test_endpoint,
-                        region_name=region,
-                        aws_access_key_id='test',
-                        aws_secret_access_key='test'
-                    )
-                    # Try a simple operation to test connectivity
-                    test_s3.list_buckets()
-                    working_endpoint = test_endpoint
-                    logger.info(f"Successfully connected to LocalStack at: {working_endpoint}")
-                    break
-                except Exception as e:
-                    logger.warning(f"Failed to connect to {test_endpoint}: {str(e)}")
-                    continue
+        test_results = []
+        
+        for i, test_endpoint in enumerate(localstack_endpoints):
+            if not test_endpoint:
+                continue
+                
+            logger.info(f"Test {i+1}/{len(localstack_endpoints)}: Testing {test_endpoint}")
+            
+            try:
+                # Quick test by creating a client and listing S3 buckets
+                test_s3 = boto3.client(
+                    's3',
+                    endpoint_url=test_endpoint,
+                    region_name=region,
+                    aws_access_key_id='test',
+                    aws_secret_access_key='test'
+                )
+                
+                # Try a simple operation to test connectivity with timeout
+                response = test_s3.list_buckets()
+                working_endpoint = test_endpoint
+                logger.info(f"✅ SUCCESS: Connected to LocalStack at {working_endpoint}")
+                logger.info(f"✅ Found {len(response.get('Buckets', []))} S3 buckets")
+                test_results.append(f"✅ {test_endpoint}: SUCCESS")
+                break
+                
+            except Exception as e:
+                error_msg = str(e)
+                logger.warning(f"❌ FAILED: {test_endpoint} - {error_msg}")
+                test_results.append(f"❌ {test_endpoint}: {error_msg}")
+                
+                # Log specific error types for debugging
+                if "Could not connect" in error_msg:
+                    logger.warning(f"   Connection error - endpoint unreachable")
+                elif "timeout" in error_msg.lower():
+                    logger.warning(f"   Timeout error - endpoint may be slow")
+                elif "refused" in error_msg.lower():
+                    logger.warning(f"   Connection refused - service may not be running")
+                else:
+                    logger.warning(f"   Other error: {error_msg}")
+                continue
+        
+        # Log all test results for debugging
+        logger.info("=== Endpoint Test Results ===")
+        for result in test_results:
+            logger.info(result)
+        logger.info("=== End Test Results ===")
         
         if not working_endpoint:
-            logger.error("Could not connect to LocalStack with any endpoint pattern")
+            logger.error("❌ CRITICAL: Could not connect to LocalStack with any endpoint pattern")
+            logger.error("Available environment variables:")
+            for key, value in sorted(os.environ.items()):
+                if any(keyword in key.upper() for keyword in ['LOCALSTACK', 'AWS', 'DOCKER', 'HOST']):
+                    logger.error(f"  {key} = {value}")
+            
             # Fallback to the original endpoint
             working_endpoint = endpoint_url or 'http://localstack:4566'
+            logger.error(f"Using fallback endpoint: {working_endpoint}")
         
         endpoint_url = working_endpoint
     
     if endpoint_url:
         # LocalStack configuration
-        logger.info(f"Using endpoint URL: {endpoint_url}")
+        logger.info(f"Final endpoint URL: {endpoint_url}")
         s3_client = boto3.client(
             's3',
             endpoint_url=endpoint_url,
@@ -79,9 +128,11 @@ def create_aws_clients():
         )
     else:
         # Production AWS configuration
+        logger.info("Using production AWS configuration (no endpoint URL)")
         s3_client = boto3.client('s3', region_name=region)
         logs_client = boto3.client('logs', region_name=region)
     
+    logger.info("=== AWS Client Creation Complete ===")
     return s3_client, logs_client
 
 s3_client, logs_client = create_aws_clients()
@@ -506,6 +557,7 @@ def lambda_handler(event, context):
         for key, value in os.environ.items():
             logger.info(f"ENV: {key} = {value}")
         logger.info("=== END DEBUG ===")
+        
         return {
             'statusCode': 200,
             'body': json.dumps({
