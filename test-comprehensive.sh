@@ -887,14 +887,19 @@ EOF
             continue
         fi
         
+        # Create a service-specific payload file with proper encoding
+        echo -e "    ${CYAN}🔍 Creating service-specific payload file...${NC}"
+        echo "${service_payload}" > "payload-${service}.json"
+        
         # Show the actual command being executed
-        echo -e "    ${CYAN}🔍 Executing: timeout 120 aws lambda invoke --endpoint-url ${AWS_ENDPOINT} --region ${AWS_REGION} --function-name ${FUNCTION_NAME} --payload '...' result-${service}.json${NC}"
+        echo -e "    ${CYAN}🔍 Executing: timeout 120 aws lambda invoke --endpoint-url ${AWS_ENDPOINT} --region ${AWS_REGION} --function-name ${FUNCTION_NAME} --cli-binary-format raw-in-base64-out --payload file://payload-${service}.json result-${service}.json${NC}"
         
         timeout 120 aws lambda invoke \
             --endpoint-url "${AWS_ENDPOINT}" \
             --region "${AWS_REGION}" \
             --function-name "${FUNCTION_NAME}" \
-            --payload "${service_payload}" \
+            --cli-binary-format raw-in-base64-out \
+            --payload file://payload-${service}.json \
             "result-${service}.json" \
             > "${LAMBDA_OUTPUTS_DIR}/invoke-${service}.log" 2>&1
         
@@ -1092,11 +1097,16 @@ run_cloudwatch_analysis() {
     
     echo -e "  ${CYAN}🔍 Analyzing CloudWatch logs...${NC}"
     
+    # Create a cloudwatch-specific payload file with proper encoding
+    echo -e "  ${CYAN}🔍 Creating CloudWatch payload file...${NC}"
+    echo "${cloudwatch_payload}" > "payload-cloudwatch.json"
+    
     aws lambda invoke \
         --endpoint-url "${AWS_ENDPOINT}" \
         --region "${AWS_REGION}" \
         --function-name "${FUNCTION_NAME}" \
-        --payload "${cloudwatch_payload}" \
+        --cli-binary-format raw-in-base64-out \
+        --payload file://payload-cloudwatch.json \
         result-cloudwatch.json \
         > "${LAMBDA_OUTPUTS_DIR}/invoke-cloudwatch.log" 2>&1
     
