@@ -40,6 +40,33 @@ jobs:
     - name: Make test script executable
       run: chmod +x test-comprehensive.sh
       
+    - name: Start LocalStack
+      run: |
+        echo "🚀 Starting LocalStack..."
+        docker run -d --name localstack \
+          -p 4566:4566 -p 4571:4571 \
+          -e DEBUG=1 \
+          -e SERVICES=lambda,s3,cloudformation,logs \
+          -e DOCKER_HOST=unix:///var/run/docker.sock \
+          -v /var/run/docker.sock:/var/run/docker.sock \
+          localstack/localstack:latest
+        
+        echo "⏳ Waiting for LocalStack to be ready..."
+        # Wait for LocalStack to be ready with better error handling
+        timeout 120 bash -c '
+          until curl -s http://localhost:4566/_localstack/health | grep -q "\"running\""; do 
+            echo "Waiting for LocalStack..."
+            sleep 3
+          done
+        ' || {
+          echo "❌ LocalStack failed to start. Checking logs..."
+          docker logs localstack
+          exit 1
+        }
+        
+        echo "✅ LocalStack is ready!"
+        curl -s http://localhost:4566/_localstack/health | jq .
+      
     - name: Run comprehensive test
       run: |
         echo "🚀 Starting comprehensive log analysis test..."
