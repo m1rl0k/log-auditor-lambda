@@ -38,20 +38,40 @@ jobs:
         sudo apt-get install -y jq
         
     - name: Configure AWS credentials for LocalStack
+      env:
+        AWS_ACCESS_KEY_ID: test
+        AWS_SECRET_ACCESS_KEY: test
+        AWS_DEFAULT_REGION: us-east-1
+        AWS_DEFAULT_OUTPUT: json
       run: |
-        # Configure dummy AWS credentials for LocalStack
-        aws configure set aws_access_key_id test
-        aws configure set aws_secret_access_key test
-        aws configure set default.region us-east-1
-        aws configure set default.output json
+        # Set AWS credentials as environment variables for LocalStack
+        echo "AWS_ACCESS_KEY_ID=test" >> $GITHUB_ENV
+        echo "AWS_SECRET_ACCESS_KEY=test" >> $GITHUB_ENV
+        echo "AWS_DEFAULT_REGION=us-east-1" >> $GITHUB_ENV
+        echo "AWS_DEFAULT_OUTPUT=json" >> $GITHUB_ENV
         
-        # Verify configuration
-        echo "AWS configuration:"
-        aws configure list
+        # Verify configuration using environment variables
+        echo "AWS configuration via environment variables:"
+        echo "AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}"
+        echo "AWS_SECRET_ACCESS_KEY: [HIDDEN]"
+        echo "AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION}"
+        echo "AWS_DEFAULT_OUTPUT: ${AWS_DEFAULT_OUTPUT}"
         
     - name: Make test script executable
       run: chmod +x test-comprehensive.sh
       
+    - name: Cleanup existing LocalStack containers
+      run: |
+        echo "Cleaning up any existing LocalStack containers..."
+        # Stop and remove any existing LocalStack containers
+        docker ps -a | grep localstack | awk '{print $1}' | xargs -r docker stop || true
+        docker ps -a | grep localstack | awk '{print $1}' | xargs -r docker rm || true
+        
+        # Kill any processes using port 4566
+        lsof -ti:4566 | xargs -r kill -9 || true
+        
+        echo "Cleanup completed"
+        
     - name: Start LocalStack
       run: |
         echo "Starting LocalStack..."
@@ -110,6 +130,14 @@ jobs:
         curl -s http://localhost:4566/_localstack/health | jq .
       
     - name: Run comprehensive test
+      env:
+        AWS_ACCESS_KEY_ID: test
+        AWS_SECRET_ACCESS_KEY: test
+        AWS_DEFAULT_REGION: us-east-1
+        AWS_DEFAULT_OUTPUT: json
+        AWS_ENDPOINT_URL: http://localhost:4566
+        ENVIRONMENT: localstack
+        LOCALSTACK_HOSTNAME: localhost
       run: |
         echo "Starting comprehensive log analysis test..."
         ./test-comprehensive.sh
