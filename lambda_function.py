@@ -21,14 +21,48 @@ def create_aws_clients():
     
     # For LocalStack environment, use internal endpoint
     if os.environ.get('ENVIRONMENT') == 'localstack':
-        # Use LocalStack's internal service endpoint
-        # In LocalStack Lambda environment, services are accessible via LOCALSTACK_HOSTNAME
-        localstack_host = os.environ.get('LOCALSTACK_HOSTNAME', 'localstack')
-        endpoint_url = f'http://{localstack_host}:4566'
-        logger.info(f"Using LocalStack endpoint: {endpoint_url}")
+        # Try multiple LocalStack endpoint patterns for container networking
+        localstack_endpoints = [
+            'http://localstack:4566',
+            'http://host.docker.internal:4566', 
+            'http://localhost:4566',
+            'http://172.17.0.1:4566',  # Common Docker bridge IP
+            endpoint_url  # fallback to provided endpoint
+        ]
+        
+        # Try each endpoint until one works
+        working_endpoint = None
+        for test_endpoint in localstack_endpoints:
+            if test_endpoint:
+                logger.info(f"Testing LocalStack endpoint: {test_endpoint}")
+                try:
+                    # Quick test by creating a client and listing S3 buckets
+                    test_s3 = boto3.client(
+                        's3',
+                        endpoint_url=test_endpoint,
+                        region_name=region,
+                        aws_access_key_id='test',
+                        aws_secret_access_key='test'
+                    )
+                    # Try a simple operation to test connectivity
+                    test_s3.list_buckets()
+                    working_endpoint = test_endpoint
+                    logger.info(f"Successfully connected to LocalStack at: {working_endpoint}")
+                    break
+                except Exception as e:
+                    logger.warning(f"Failed to connect to {test_endpoint}: {str(e)}")
+                    continue
+        
+        if not working_endpoint:
+            logger.error("Could not connect to LocalStack with any endpoint pattern")
+            # Fallback to the original endpoint
+            working_endpoint = endpoint_url or 'http://localstack:4566'
+        
+        endpoint_url = working_endpoint
     
     if endpoint_url:
         # LocalStack configuration
+        logger.info(f"Using endpoint URL: {endpoint_url}")
         s3_client = boto3.client(
             's3',
             endpoint_url=endpoint_url,
