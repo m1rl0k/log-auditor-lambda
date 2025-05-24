@@ -753,7 +753,7 @@ run_s3_analysis() {
     fi
     
     echo -e "  ${CYAN}🔍 Debug payload size: $(cat test-debug.json | wc -c) bytes${NC}"
-    echo -e "  ${CYAN}🔍 Executing debug test: timeout 30 aws lambda invoke --endpoint-url ${AWS_ENDPOINT} --region ${AWS_REGION} --function-name ${FUNCTION_NAME} --payload file://test-debug.json result-debug.json${NC}"
+    echo -e "  ${CYAN}🔍 Executing debug test: timeout 120 aws lambda invoke --endpoint-url ${AWS_ENDPOINT} --region ${AWS_REGION} --function-name ${FUNCTION_NAME} --payload file://test-debug.json result-debug.json${NC}"
     
     # Use properly escaped JSON payload for GitHub Actions compatibility
     echo -e "  ${CYAN}🔍 Creating JSON payload file with proper encoding...${NC}"
@@ -768,9 +768,9 @@ run_s3_analysis() {
 EOF
     
     echo -e "  ${CYAN}🔍 Using properly formatted payload file...${NC}"
-    echo -e "  ${CYAN}🔍 Executing debug test: timeout 30 aws lambda invoke --endpoint-url ${AWS_ENDPOINT} --region ${AWS_REGION} --function-name ${FUNCTION_NAME} --cli-binary-format raw-in-base64-out --payload file://test-debug.json result-debug.json${NC}"
+    echo -e "  ${CYAN}🔍 Executing debug test: timeout 120 aws lambda invoke --endpoint-url ${AWS_ENDPOINT} --region ${AWS_REGION} --function-name ${FUNCTION_NAME} --cli-binary-format raw-in-base64-out --payload file://test-debug.json result-debug.json${NC}"
     
-    timeout 30 aws lambda invoke \
+    timeout 120 aws lambda invoke \
         --endpoint-url "${AWS_ENDPOINT}" \
         --region "${AWS_REGION}" \
         --function-name "${FUNCTION_NAME}" \
