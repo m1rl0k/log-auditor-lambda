@@ -550,6 +550,23 @@ EOF
         
         # Invoke Lambda function with timeout
         echo -e "    ${CYAN}⏳ Invoking Lambda function for ${service} service...${NC}"
+        
+        # Debug: Show the test payload being sent
+        echo -e "    ${CYAN}🔍 Test payload size: $(cat "test-${service}.json" | wc -c) bytes${NC}"
+        
+        # Debug: Verify Lambda function exists before invocation
+        echo -e "    ${CYAN}🔍 Verifying Lambda function exists...${NC}"
+        if aws lambda get-function --endpoint-url "${AWS_ENDPOINT}" --region "${AWS_REGION}" --function-name "${FUNCTION_NAME}" > /dev/null 2>&1; then
+            echo -e "    ${GREEN}✅ Lambda function exists and is accessible${NC}"
+        else
+            echo -e "    ${RED}❌ Lambda function not accessible${NC}"
+            log_message "ERROR" "${service}: Lambda function not accessible"
+            continue
+        fi
+        
+        # Show the actual command being executed
+        echo -e "    ${CYAN}🔍 Executing: timeout 120 aws lambda invoke --endpoint-url ${AWS_ENDPOINT} --region ${AWS_REGION} --function-name ${FUNCTION_NAME} --payload file://test-${service}.json result-${service}.json${NC}"
+        
         timeout 120 aws lambda invoke \
             --endpoint-url "${AWS_ENDPOINT}" \
             --region "${AWS_REGION}" \
@@ -559,6 +576,16 @@ EOF
             > "${LAMBDA_OUTPUTS_DIR}/invoke-${service}.log" 2>&1
         
         local invoke_exit_code=$?
+        
+        # Debug: Show what was captured in the log
+        echo -e "    ${CYAN}🔍 Lambda invocation exit code: ${invoke_exit_code}${NC}"
+        if [ -f "${LAMBDA_OUTPUTS_DIR}/invoke-${service}.log" ]; then
+            echo -e "    ${CYAN}🔍 Invocation log size: $(cat "${LAMBDA_OUTPUTS_DIR}/invoke-${service}.log" | wc -c) bytes${NC}"
+            if [ -s "${LAMBDA_OUTPUTS_DIR}/invoke-${service}.log" ]; then
+                echo -e "    ${CYAN}🔍 First few lines of invocation log:${NC}"
+                head -3 "${LAMBDA_OUTPUTS_DIR}/invoke-${service}.log" | sed 's/^/      /'
+            fi
+        fi
         
         # Check for timeout or other failures
         if [ $invoke_exit_code -eq 124 ]; then
