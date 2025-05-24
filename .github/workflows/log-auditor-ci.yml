@@ -42,14 +42,12 @@ jobs:
       
     - name: Start LocalStack
       run: |
-        echo "🚀 Starting LocalStack..."
-        docker run -d --name localstack \
-          -p 4566:4566 -p 4571:4571 \
-          -e DEBUG=1 \
-          -e SERVICES=lambda,s3,cloudformation,logs \
-          -e DOCKER_HOST=unix:///var/run/docker.sock \
-          -v /var/run/docker.sock:/var/run/docker.sock \
-          localstack/localstack:latest
+        echo "🚀 Starting LocalStack with docker-compose..."
+        # Add S3 service to the compose services since our tests need it
+        export SERVICES=lambda,s3,cloudformation,logs,iam,sts
+        
+        # Start LocalStack using docker-compose
+        docker-compose up -d localstack
         
         echo "⏳ Waiting for LocalStack to be ready..."
         # Give LocalStack a moment to start
@@ -61,9 +59,9 @@ jobs:
             echo "Checking LocalStack health..."
             
             # Check if LocalStack container is running
-            if ! docker ps | grep -q localstack; then
+            if ! docker-compose ps localstack | grep -q "Up"; then
               echo "❌ LocalStack container is not running"
-              docker logs localstack --tail 20
+              docker-compose logs localstack --tail 20
               exit 1
             fi
             
@@ -85,9 +83,9 @@ jobs:
           done
         ' || {
           echo "❌ LocalStack failed to start within timeout. Checking logs..."
-          docker logs localstack --tail 50
+          docker-compose logs localstack --tail 50
           echo "Container status:"
-          docker ps -a | grep localstack
+          docker-compose ps
           exit 1
         }
         
