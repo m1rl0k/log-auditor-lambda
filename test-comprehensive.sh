@@ -57,12 +57,27 @@ detect_localstack_endpoint() {
     if [ -n "$GITHUB_ACTIONS" ]; then
         echo -e "  ${CYAN}📍 GitHub Actions environment detected${NC}"
         
-        # Try GitHub Actions specific endpoints
+        # Try to get the actual LocalStack container IP first
+        local container_ip=""
+        if docker ps --format "{{.Names}}" | grep -q localstack; then
+            container_ip=$(docker inspect localstack-main --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 2>/dev/null || echo "")
+            if [ -n "$container_ip" ]; then
+                echo -e "    ${CYAN}🔍 Found LocalStack container IP: ${container_ip}${NC}"
+            fi
+        fi
+        
+        # Try GitHub Actions specific endpoints including the container IP
         local github_endpoints=(
             "http://localhost:4566"
             "http://127.0.0.1:4566"
-            "http://host.docker.internal:4566"
         )
+        
+        # Add container IP endpoint if found
+        if [ -n "$container_ip" ]; then
+            github_endpoints+=("http://${container_ip}:4566")
+        fi
+        
+        github_endpoints+=("http://host.docker.internal:4566")
         
         for endpoint in "${github_endpoints[@]}"; do
             echo -e "    ${CYAN}🧪 Testing endpoint: ${endpoint}${NC}"
@@ -77,6 +92,21 @@ detect_localstack_endpoint() {
         
         echo -e "    ${YELLOW}⚠️  No endpoints responding, using default: http://localhost:4566${NC}"
         AWS_ENDPOINT="http://localhost:4566"
+        
+        # As a last resort, try the known container IP from the debug output
+        echo -e "    ${CYAN}🔄 Fallback: Testing known container patterns...${NC}"
+        local fallback_ips=("172.18.0.2" "172.17.0.2")
+        for ip in "${fallback_ips[@]}"; do
+            local test_endpoint="http://${ip}:4566"
+            echo -e "      ${CYAN}🧪 Testing fallback: ${test_endpoint}${NC}"
+            if curl -s --connect-timeout 3 --max-time 5 "${test_endpoint}/_localstack/health" > /dev/null 2>&1; then
+                echo -e "      ${GREEN}✅ Fallback success! Using: ${test_endpoint}${NC}"
+                AWS_ENDPOINT="$test_endpoint"
+                return 0
+            else
+                echo -e "      ${RED}❌ Fallback failed: ${test_endpoint}${NC}"
+            fi
+        done
     else
         echo -e "  ${CYAN}📍 Local development environment${NC}"
         
@@ -117,7 +147,22 @@ if [ -n "$GITHUB_ACTIONS" ]; then
     # Try to get LocalStack container IP if running
     if docker ps --format "{{.Names}}" | grep -q localstack; then
         echo -e "  ${CYAN}🔍 LocalStack container details:${NC}"
-        docker inspect localstack-main --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 2>/dev/null | sed 's/^/    IP: /' || echo "    Could not get container IP"
+        container_ip=$(docker inspect localstack-main --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 2>/dev/null | head -1)
+        if [ -n "$container_ip" ]; then
+            echo -e "    IP: ${container_ip}"
+            
+            # Test this IP directly for GitHub Actions
+            echo -e "  ${CYAN}🧪 Testing direct container IP access: http://${container_ip}:4566${NC}"
+            if curl -s --connect-timeout 3 --max-time 5 "http://${container_ip}:4566/_localstack/health" > /dev/null 2>&1; then
+                echo -e "    ${GREEN}✅ Direct container IP access works!${NC}"
+                echo -e "    ${CYAN}💡 Override AWS_ENDPOINT to use container IP${NC}"
+                AWS_ENDPOINT="http://${container_ip}:4566"
+            else
+                echo -e "    ${RED}❌ Direct container IP access failed${NC}"
+            fi
+        else
+            echo -e "    Could not get container IP"
+        fi
     fi
     
     echo -e "  ${CYAN}📍 Final endpoint: ${AWS_ENDPOINT}${NC}"
@@ -678,6 +723,25 @@ run_s3_analysis() {
         # Check if our function exists
         if aws lambda get-function --endpoint-url "${AWS_ENDPOINT}" --region "${AWS_REGION}" --function-name "${FUNCTION_NAME}" > /dev/null 2>&1; then
             echo -e "      ${GREEN}✅ Target Lambda function '${FUNCTION_NAME}' exists${NC}"
+            
+            # Test a simple synchronous invocation without timeout first
+            echo -e "      ${CYAN}🧪 Testing basic Lambda invocation (no timeout)...${NC}"
+            echo '{"test": true}' > simple-test.json
+            
+            if aws lambda invoke \
+                --endpoint-url "${AWS_ENDPOINT}" \
+                --region "${AWS_REGION}" \
+                --function-name "${FUNCTION_NAME}" \
+                --payload file://simple-test.json \
+                simple-result.json > simple-invoke.log 2>&1; then
+                echo -e "        ${GREEN}✅ Basic Lambda invocation successful${NC}"
+                rm -f simple-test.json simple-result.json simple-invoke.log
+            else
+                echo -e "        ${RED}❌ Basic Lambda invocation failed${NC}"
+                echo -e "        ${CYAN}🔍 Error details:${NC}"
+                cat simple-invoke.log | head -5 | sed 's/^/          /' || echo "          No error details available"
+                rm -f simple-test.json simple-result.json simple-invoke.log
+            fi
         else
             echo -e "      ${RED}❌ Target Lambda function '${FUNCTION_NAME}' not found${NC}"
         fi
