@@ -1,0 +1,5 @@
+{
+  "debug": true,
+  "test_connection": true,
+  "environment_check": true
+}
