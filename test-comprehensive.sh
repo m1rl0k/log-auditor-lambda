@@ -430,13 +430,57 @@ create_demo_logs() {
 
     # Upload log files to S3
     echo -e "  ${CYAN}⬆️  Uploading log files to S3...${NC}"
-    aws s3 cp demo-log-payment.log "s3://${LOG_BUCKET}/services/payment/2024/11/26/payment-service.log" --endpoint-url "${AWS_ENDPOINT}" --quiet
-    aws s3 cp demo-log-auth.log "s3://${LOG_BUCKET}/services/auth/2024/11/26/auth-service.log" --endpoint-url "${AWS_ENDPOINT}" --quiet
-    aws s3 cp demo-log-database.log "s3://${LOG_BUCKET}/services/database/2024/11/26/database-service.log" --endpoint-url "${AWS_ENDPOINT}" --quiet
-    aws s3 cp demo-log-api-gateway.log "s3://${LOG_BUCKET}/services/api-gateway/2024/11/26/api-gateway-service.log" --endpoint-url "${AWS_ENDPOINT}" --quiet
     
-    # List uploaded files
+    # Upload with error checking (remove --quiet to see errors)
+    echo -e "    ${CYAN}📁 Uploading payment logs...${NC}"
+    if aws s3 cp demo-log-payment.log "s3://${LOG_BUCKET}/services/payment/2024/11/26/payment-service.log" --endpoint-url "${AWS_ENDPOINT}"; then
+        echo -e "    ${GREEN}✅ Payment logs uploaded${NC}"
+    else
+        echo -e "    ${RED}❌ Failed to upload payment logs${NC}"
+        log_message "ERROR" "Failed to upload payment logs"
+    fi
+    
+    echo -e "    ${CYAN}📁 Uploading auth logs...${NC}"
+    if aws s3 cp demo-log-auth.log "s3://${LOG_BUCKET}/services/auth/2024/11/26/auth-service.log" --endpoint-url "${AWS_ENDPOINT}"; then
+        echo -e "    ${GREEN}✅ Auth logs uploaded${NC}"
+    else
+        echo -e "    ${RED}❌ Failed to upload auth logs${NC}"
+        log_message "ERROR" "Failed to upload auth logs"
+    fi
+    
+    echo -e "    ${CYAN}📁 Uploading database logs...${NC}"
+    if aws s3 cp demo-log-database.log "s3://${LOG_BUCKET}/services/database/2024/11/26/database-service.log" --endpoint-url "${AWS_ENDPOINT}"; then
+        echo -e "    ${GREEN}✅ Database logs uploaded${NC}"
+    else
+        echo -e "    ${RED}❌ Failed to upload database logs${NC}"
+        log_message "ERROR" "Failed to upload database logs"
+    fi
+    
+    echo -e "    ${CYAN}📁 Uploading api-gateway logs...${NC}"
+    if aws s3 cp demo-log-api-gateway.log "s3://${LOG_BUCKET}/services/api-gateway/2024/11/26/api-gateway-service.log" --endpoint-url "${AWS_ENDPOINT}"; then
+        echo -e "    ${GREEN}✅ API Gateway logs uploaded${NC}"
+    else
+        echo -e "    ${RED}❌ Failed to upload api-gateway logs${NC}"
+        log_message "ERROR" "Failed to upload api-gateway logs"
+    fi
+    
+    # Verify uploads by listing bucket contents
+    echo -e "  ${CYAN}🔍 Verifying S3 uploads...${NC}"
     aws s3 ls "s3://${LOG_BUCKET}/" --recursive --endpoint-url "${AWS_ENDPOINT}" > "${OUTPUT_DIR}/s3-uploaded-files.log"
+    
+    local upload_count=$(cat "${OUTPUT_DIR}/s3-uploaded-files.log" | wc -l)
+    echo -e "  ${CYAN}📊 Found ${upload_count} files in S3 bucket${NC}"
+    
+    if [ "$upload_count" -eq 4 ]; then
+        echo -e "  ${GREEN}✅ All 4 log files verified in S3${NC}"
+        echo -e "  ${CYAN}📋 Uploaded files:${NC}"
+        cat "${OUTPUT_DIR}/s3-uploaded-files.log" | awk '{print "    🔸 " $4 " (" $3 " bytes)"}'
+    else
+        echo -e "  ${RED}❌ Expected 4 files, found ${upload_count}${NC}"
+        echo -e "  ${YELLOW}💡 S3 bucket contents:${NC}"
+        cat "${OUTPUT_DIR}/s3-uploaded-files.log" | sed 's/^/    /'
+        log_message "ERROR" "S3 upload verification failed: expected 4 files, found ${upload_count}"
+    fi
     
     echo -e "  ${GREEN}✅ Demo log files created and uploaded${NC}"
     log_message "SUCCESS" "Demo log files created and uploaded"
@@ -486,6 +530,75 @@ EOF
 run_s3_analysis() {
     echo -e "${YELLOW}=== Running S3 Log Analysis Demo ===${NC}"
     log_message "INFO" "Running S3 log analysis demo"
+    
+    # First, test Lambda function with a simple debug payload
+    echo -e "  ${CYAN}🧪 Testing Lambda function connectivity...${NC}"
+    cat > test-debug.json << EOF
+{
+    "debug": true,
+    "test_connection": true,
+    "environment_check": true
+}
+EOF
+    
+    echo -e "  ${CYAN}🔍 Debug payload size: $(cat test-debug.json | wc -c) bytes${NC}"
+    echo -e "  ${CYAN}🔍 Executing debug test: timeout 30 aws lambda invoke --endpoint-url ${AWS_ENDPOINT} --region ${AWS_REGION} --function-name ${FUNCTION_NAME} --payload file://test-debug.json result-debug.json${NC}"
+    
+    timeout 30 aws lambda invoke \
+        --endpoint-url "${AWS_ENDPOINT}" \
+        --region "${AWS_REGION}" \
+        --function-name "${FUNCTION_NAME}" \
+        --payload file://test-debug.json \
+        result-debug.json \
+        > "${LAMBDA_OUTPUTS_DIR}/invoke-debug.log" 2>&1
+    
+    local debug_exit_code=$?
+    echo -e "  ${CYAN}🔍 Debug test exit code: ${debug_exit_code}${NC}"
+    
+    # Show debug log contents if any
+    if [ -f "${LAMBDA_OUTPUTS_DIR}/invoke-debug.log" ]; then
+        echo -e "  ${CYAN}🔍 Debug log size: $(cat "${LAMBDA_OUTPUTS_DIR}/invoke-debug.log" | wc -c) bytes${NC}"
+        if [ -s "${LAMBDA_OUTPUTS_DIR}/invoke-debug.log" ]; then
+            echo -e "  ${CYAN}🔍 Debug log contents:${NC}"
+            cat "${LAMBDA_OUTPUTS_DIR}/invoke-debug.log" | sed 's/^/    /'
+        fi
+    fi
+    
+    # Check debug response
+    if [ -f "result-debug.json" ]; then
+        local debug_status=$(jq -r '.statusCode' result-debug.json 2>/dev/null || echo "unknown")
+        echo -e "  ${CYAN}🔍 Debug response status code: ${debug_status}${NC}"
+        
+        if [ "$debug_status" = "200" ]; then
+            echo -e "  ${GREEN}✅ Lambda function is responding correctly${NC}"
+            log_message "SUCCESS" "Lambda function debug test successful"
+            
+            # Show debug response for troubleshooting
+            local debug_body=$(jq -r '.body' result-debug.json 2>/dev/null || echo "{}")
+            echo -e "  ${CYAN}🔍 Debug response body:${NC}"
+            echo "$debug_body" | jq . 2>/dev/null | head -10 | sed 's/^/    /' || echo "    Could not parse debug response"
+        else
+            echo -e "  ${RED}❌ Lambda function returned status: ${debug_status}${NC}"
+            log_message "ERROR" "Lambda function debug test failed with status: ${debug_status}"
+            echo -e "  ${CYAN}🔍 Full debug response:${NC}"
+            cat result-debug.json | sed 's/^/    /'
+            
+            # If debug test fails, don't continue with main analysis
+            echo -e "  ${RED}❌ Stopping analysis due to debug test failure${NC}"
+            rm -f test-debug.json result-debug.json
+            return
+        fi
+    else
+        echo -e "  ${RED}❌ No debug result file generated${NC}"
+        log_message "ERROR" "Lambda debug test produced no result"
+        
+        # If no result file, don't continue
+        echo -e "  ${RED}❌ Stopping analysis due to debug test failure${NC}"
+        rm -f test-debug.json result-debug.json
+        return
+    fi
+    
+    rm -f test-debug.json result-debug.json
     
     # Get the results bucket from CloudFormation outputs
     local results_bucket=$(aws cloudformation describe-stacks \
@@ -554,6 +667,26 @@ EOF
         # Debug: Show the test payload being sent
         echo -e "    ${CYAN}🔍 Test payload size: $(cat "test-${service}.json" | wc -c) bytes${NC}"
         
+        # Debug: Verify the specific S3 object exists before Lambda invocation
+        local s3_object_key="services/${service}/2024/11/26/${service}-service.log"
+        echo -e "    ${CYAN}🔍 Verifying S3 object exists: s3://${LOG_BUCKET}/${s3_object_key}${NC}"
+        
+        if aws s3api head-object --bucket "${LOG_BUCKET}" --key "${s3_object_key}" --endpoint-url "${AWS_ENDPOINT}" >/dev/null 2>&1; then
+            echo -e "    ${GREEN}✅ S3 object exists and is accessible${NC}"
+            
+            # Get object size for verification
+            local object_size=$(aws s3api head-object --bucket "${LOG_BUCKET}" --key "${s3_object_key}" --endpoint-url "${AWS_ENDPOINT}" --query 'ContentLength' --output text 2>/dev/null || echo "unknown")
+            echo -e "    ${CYAN}📊 S3 object size: ${object_size} bytes${NC}"
+        else
+            echo -e "    ${RED}❌ S3 object not found or not accessible${NC}"
+            log_message "ERROR" "${service}: S3 object not found: s3://${LOG_BUCKET}/${s3_object_key}"
+            
+            # Show what IS in the bucket for debugging
+            echo -e "    ${YELLOW}💡 Current bucket contents:${NC}"
+            aws s3 ls "s3://${LOG_BUCKET}/" --recursive --endpoint-url "${AWS_ENDPOINT}" | head -10 | sed 's/^/      /'
+            continue
+        fi
+        
         # Debug: Verify Lambda function exists before invocation
         echo -e "    ${CYAN}🔍 Verifying Lambda function exists...${NC}"
         if aws lambda get-function --endpoint-url "${AWS_ENDPOINT}" --region "${AWS_REGION}" --function-name "${FUNCTION_NAME}" > /dev/null 2>&1; then
@@ -599,6 +732,45 @@ EOF
             echo -e "    ${YELLOW}💡 Invoke logs:${NC}"
             cat "${LAMBDA_OUTPUTS_DIR}/invoke-${service}.log" | head -10
             echo -e "    ${YELLOW}💡 Check Lambda function logs in LocalStack${NC}"
+            
+            # For exit code 255, try to get more specific error information
+            if [ $invoke_exit_code -eq 255 ]; then
+                echo -e "    ${YELLOW}💡 Exit code 255 suggests AWS CLI or Lambda execution error${NC}"
+                echo -e "    ${CYAN}🔍 Attempting to get Lambda function logs...${NC}"
+                
+                # Try to get recent Lambda logs from CloudWatch
+                aws logs describe-log-groups \
+                    --endpoint-url "${AWS_ENDPOINT}" \
+                    --region "${AWS_REGION}" \
+                    --log-group-name-prefix "/aws/lambda/${FUNCTION_NAME}" \
+                    > "${LAMBDA_OUTPUTS_DIR}/lambda-log-groups-${service}.log" 2>&1
+                
+                if aws logs describe-log-streams \
+                    --endpoint-url "${AWS_ENDPOINT}" \
+                    --region "${AWS_REGION}" \
+                    --log-group-name "/aws/lambda/${FUNCTION_NAME}" \
+                    --order-by LastEventTime \
+                    --descending \
+                    --max-items 1 \
+                    > "${LAMBDA_OUTPUTS_DIR}/lambda-log-streams-${service}.log" 2>&1; then
+                    
+                    local latest_stream=$(jq -r '.logStreams[0].logStreamName' "${LAMBDA_OUTPUTS_DIR}/lambda-log-streams-${service}.log" 2>/dev/null)
+                    if [ "$latest_stream" != "null" ] && [ -n "$latest_stream" ]; then
+                        echo -e "    ${CYAN}🔍 Found Lambda log stream: ${latest_stream}${NC}"
+                        aws logs get-log-events \
+                            --endpoint-url "${AWS_ENDPOINT}" \
+                            --region "${AWS_REGION}" \
+                            --log-group-name "/aws/lambda/${FUNCTION_NAME}" \
+                            --log-stream-name "$latest_stream" \
+                            --limit 20 \
+                            > "${LAMBDA_OUTPUTS_DIR}/lambda-execution-logs-${service}.log" 2>&1
+                        
+                        echo -e "    ${CYAN}🔍 Recent Lambda execution logs:${NC}"
+                        jq -r '.events[].message' "${LAMBDA_OUTPUTS_DIR}/lambda-execution-logs-${service}.log" 2>/dev/null | tail -5 | sed 's/^/      /' || echo "      Could not parse Lambda logs"
+                    fi
+                fi
+            fi
+            
             continue
         fi
         
