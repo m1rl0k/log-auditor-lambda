@@ -761,7 +761,7 @@ run_s3_analysis() {
         --endpoint-url "${AWS_ENDPOINT}" \
         --region "${AWS_REGION}" \
         --function-name "${FUNCTION_NAME}" \
-        --payload "${debug_payload}" \
+        --payload '{"debug": true, "test_connection": true, "environment_check": true}' \
         result-debug.json \
         > "${LAMBDA_OUTPUTS_DIR}/invoke-debug.log" 2>&1
     
@@ -1229,8 +1229,6 @@ cleanup_demo() {
         --endpoint-url "${AWS_ENDPOINT}" \
         --region "${AWS_REGION}" \
         --stack-name "${STACK_NAME}" > "${OUTPUT_DIR}/cleanup-wait.log" 2>&1 || true
-    
-   
     
     echo -e "  ${GREEN}✅ Demo cleanup completed${NC}"
     log_message "SUCCESS" "Demo cleanup completed"
