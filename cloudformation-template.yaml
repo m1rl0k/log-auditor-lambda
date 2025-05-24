@@ -12,7 +12,7 @@ Resources:
   AuditResultsBucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Sub '${FunctionName}-results-${AWS::AccountId}'
+      BucketName: !Sub '${FunctionName}-results-bucket'
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
@@ -30,8 +30,6 @@ Resources:
             Principal:
               Service: lambda.amazonaws.com
             Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
       Policies:
         - PolicyName: LogAuditorPolicy
           PolicyDocument:
@@ -39,23 +37,12 @@ Resources:
             Statement:
               - Effect: Allow
                 Action:
-                  - logs:CreateLogGroup
-                  - logs:CreateLogStream
-                  - logs:PutLogEvents
-                  - logs:DescribeLogGroups
-                  - logs:DescribeLogStreams
-                  - logs:GetLogEvents
-                  - logs:FilterLogEvents
+                  - logs:*
                 Resource: "*"
               - Effect: Allow
                 Action:
-                  - s3:GetObject
-                  - s3:PutObject
-                  - s3:ListBucket
-                Resource: 
-                  - !Sub 'arn:aws:s3:::${AuditResultsBucket}/*'
-                  - !Sub 'arn:aws:s3:::${AuditResultsBucket}'
-                  - 'arn:aws:s3:::*'
+                  - s3:*
+                Resource: "*"
 
   # CloudWatch Log Group for Lambda function
   LambdaLogGroup:
@@ -93,7 +80,6 @@ Resources:
         Variables:
           ENVIRONMENT: 'localstack'
           AUDIT_RESULTS_BUCKET: !Ref AuditResultsBucket
-          AWS_ENDPOINT_URL: 'http://localhost:4566'
 
 Outputs:
   FunctionName:
