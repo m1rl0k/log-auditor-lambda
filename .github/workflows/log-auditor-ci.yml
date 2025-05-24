@@ -58,17 +58,17 @@ jobs:
         docker run -d --name localstack \
           -p 4566:4566 -p 4571:4571 \
           -e DEBUG=1 \
-          -e SERVICES=lambda,s3,cloudformation,logs \
+          -e SERVICES=lambda,s3,cloudformation,logs,iam,sts \
           -e DOCKER_HOST=unix:///var/run/docker.sock \
           -v /var/run/docker.sock:/var/run/docker.sock \
           localstack/localstack:latest
         
         echo "Waiting for LocalStack to be ready..."
-        # Give LocalStack a moment to start
-        sleep 10
+        # Give LocalStack more time to start all services
+        sleep 15
         
         # Wait for LocalStack to be ready with better debugging
-        timeout 180 bash -c '
+        timeout 300 bash -c '
           while true; do
             echo "Checking LocalStack health..."
             
@@ -84,10 +84,13 @@ jobs:
             if [ -n "$health_response" ]; then
               echo "Health response: $health_response"
               
-              # Check if required services are running
-              if echo "$health_response" | jq -e ".services.lambda == \"available\" and .services.s3 == \"available\" and .services.cloudformation == \"available\" and .services.logs == \"available\"" >/dev/null 2>&1; then
+              # Check if all required services are running (including IAM for CloudFormation roles)
+              if echo "$health_response" | jq -e "(.services.lambda == \"available\" or .services.lambda == \"running\") and (.services.s3 == \"available\" or .services.s3 == \"running\") and (.services.cloudformation == \"available\" or .services.cloudformation == \"running\") and (.services.logs == \"available\" or .services.logs == \"running\") and (.services.iam == \"available\" or .services.iam == \"running\") and (.services.sts == \"available\" or .services.sts == \"running\")" >/dev/null 2>&1; then
                 echo "All required services are available!"
                 break
+              else
+                echo "Some services not ready yet, checking individual status:"
+                echo "$health_response" | jq -r ".services | to_entries | .[] | \"\(.key): \(.value)\""
               fi
             else
               echo "No health response yet..."
