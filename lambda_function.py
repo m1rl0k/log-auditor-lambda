@@ -26,17 +26,33 @@ def create_aws_clients():
     
     # For LocalStack environment, use internal endpoint
     if os.environ.get('ENVIRONMENT') == 'localstack':
-        # Try multiple LocalStack endpoint patterns for container networking
-        localstack_endpoints = [
-            'http://localstack:4566',
-            'http://host.docker.internal:4566', 
+        # Prioritize endpoints based on environment
+        github_actions_endpoints = [
+            'http://host.docker.internal:4566',  # GitHub Actions preferred
             'http://localhost:4566',
-            'http://127.0.0.1:4566',
+            'http://127.0.0.1:4566'
+        ]
+        
+        docker_container_endpoints = [
+            'http://localstack:4566',
             'http://172.17.0.1:4566',  # Common Docker bridge IP
             'http://172.18.0.1:4566',  # Another common Docker bridge IP
             'http://10.0.2.15:4566',   # VirtualBox/VM networking
-            endpoint_url  # fallback to provided endpoint
         ]
+        
+        # Check if we're in GitHub Actions
+        github_actions = os.environ.get('GITHUB_ACTIONS', '').lower() == 'true'
+        
+        if github_actions:
+            logger.info("GitHub Actions environment detected - prioritizing host.docker.internal")
+            localstack_endpoints = github_actions_endpoints + docker_container_endpoints
+        else:
+            logger.info("Standard environment - trying container networking first")  
+            localstack_endpoints = docker_container_endpoints + github_actions_endpoints
+        
+        # Add provided endpoint as fallback
+        if endpoint_url:
+            localstack_endpoints.append(endpoint_url)
         
         # Also try to get container IP from environment if available
         container_ip = os.environ.get('LOCALSTACK_CONTAINER_IP')
@@ -63,7 +79,12 @@ def create_aws_clients():
                     endpoint_url=test_endpoint,
                     region_name=region,
                     aws_access_key_id='test',
-                    aws_secret_access_key='test'
+                    aws_secret_access_key='test',
+                    config=Config(
+                        read_timeout=5,
+                        connect_timeout=3,
+                        retries={'max_attempts': 0}  # No retries for faster testing
+                    )
                 )
                 
                 # Try a simple operation to test connectivity with timeout
@@ -110,21 +131,29 @@ def create_aws_clients():
         endpoint_url = working_endpoint
     
     if endpoint_url:
-        # LocalStack configuration
+        # LocalStack configuration with optimized timeouts
         logger.info(f"Final endpoint URL: {endpoint_url}")
+        client_config = Config(
+            read_timeout=30,
+            connect_timeout=10,
+            retries={'max_attempts': 3}
+        )
+        
         s3_client = boto3.client(
             's3',
             endpoint_url=endpoint_url,
             region_name=region,
             aws_access_key_id='test',
-            aws_secret_access_key='test'
+            aws_secret_access_key='test',
+            config=client_config
         )
         logs_client = boto3.client(
             'logs',
             endpoint_url=endpoint_url,
             region_name=region,
             aws_access_key_id='test',
-            aws_secret_access_key='test'
+            aws_secret_access_key='test',
+            config=client_config
         )
     else:
         # Production AWS configuration
