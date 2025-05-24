@@ -131,8 +131,13 @@ jobs:
         AWS_ENDPOINT_URL: http://localhost:4566
         ENVIRONMENT: localstack
         LOCALSTACK_HOSTNAME: localhost
+        GITHUB_ACTIONS: true
       run: |
         echo "Starting comprehensive log analysis test..."
+        echo "Environment debug:"
+        echo "  GITHUB_ACTIONS=${GITHUB_ACTIONS}"
+        echo "  AWS_ENDPOINT_URL=${AWS_ENDPOINT_URL}"
+        echo "  ENVIRONMENT=${ENVIRONMENT}"
         ./test-comprehensive.sh
         echo "Test completed!"
         
