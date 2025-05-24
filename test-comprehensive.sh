@@ -325,10 +325,7 @@ deploy_infrastructure() {
         echo -e "  ${YELLOW}💡 Error details:${NC}"
         cat "${OUTPUT_DIR}/cloudformation-deploy.log"
         
-        # Try direct resource creation as fallback
-        echo -e "  ${YELLOW}🔄 Trying direct resource creation as fallback...${NC}"
-        deploy_resources_directly
-        return
+        exit 1
     fi
     
     # Get stack outputs
