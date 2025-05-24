@@ -1,0 +1,127 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Python CloudWatch Log Auditor Lambda Function for LocalStack'
+
+Parameters:
+  FunctionName:
+    Type: String
+    Default: 'log-auditor'
+    Description: 'Name of the Lambda function'
+
+Resources:
+  # S3 Bucket for storing audit results
+  AuditResultsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${FunctionName}-results-${AWS::AccountId}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  # IAM Role for Lambda execution
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: LogAuditorPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:DescribeLogGroups
+                  - logs:DescribeLogStreams
+                  - logs:GetLogEvents
+                  - logs:FilterLogEvents
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:ListBucket
+                Resource: 
+                  - !Sub 'arn:aws:s3:::${AuditResultsBucket}/*'
+                  - !Sub 'arn:aws:s3:::${AuditResultsBucket}'
+                  - 'arn:aws:s3:::*'
+
+  # CloudWatch Log Group for Lambda function
+  LambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${FunctionName}'
+      RetentionInDays: 7
+
+  # Lambda Function
+  LogAuditorFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: 
+      - LambdaExecutionRole
+      - LambdaLogGroup
+    Properties:
+      FunctionName: !Ref FunctionName
+      Runtime: python3.9
+      Handler: lambda_function.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: |
+          import json
+          def lambda_handler(event, context):
+              return {
+                  'statusCode': 200,
+                  'body': json.dumps({
+                      'message': 'Log Auditor Lambda function deployed successfully',
+                      'event': event
+                  })
+              }
+      Description: 'Python CloudWatch Log Auditor Lambda function'
+      Timeout: 300
+      MemorySize: 512
+      Environment:
+        Variables:
+          ENVIRONMENT: 'localstack'
+          AUDIT_RESULTS_BUCKET: !Ref AuditResultsBucket
+          AWS_ENDPOINT_URL: 'http://localhost:4566'
+
+Outputs:
+  FunctionName:
+    Description: 'Name of the Lambda function'
+    Value: !Ref LogAuditorFunction
+    Export:
+      Name: !Sub '${AWS::StackName}-FunctionName'
+
+  FunctionArn:
+    Description: 'ARN of the Lambda function'
+    Value: !GetAtt LogAuditorFunction.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-FunctionArn'
+
+  ExecutionRoleArn:
+    Description: 'ARN of the Lambda execution role'
+    Value: !GetAtt LambdaExecutionRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-ExecutionRoleArn'
+
+  AuditResultsBucket:
+    Description: 'S3 bucket for storing audit results'
+    Value: !Ref AuditResultsBucket
+    Export:
+      Name: !Sub '${AWS::StackName}-AuditResultsBucket'
+
+  AuditResultsBucketArn:
+    Description: 'ARN of the audit results S3 bucket'
+    Value: !GetAtt AuditResultsBucket.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-AuditResultsBucketArn' 

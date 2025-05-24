@@ -1,0 +1,8 @@
+# Requirements for the Lambda function
+# Currently only using standard library, but this file is here for future dependencies
+
+# For development and testing
+# boto3==1.34.0  # AWS SDK (uncomment if needed)
+# pytest==7.4.0  # For unit tests (uncomment if needed)
+
+boto3>=1.34.0  # AWS SDK for S3 and CloudWatch integration 

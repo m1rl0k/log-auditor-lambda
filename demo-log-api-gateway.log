@@ -1,0 +1,111 @@
+2024-11-26T10:30:00Z [INFO] API Gateway started on port 8080
+2024-11-26T10:30:05Z [INFO] GET /api/users/123 - status: 200 - response_time: 45ms - user_agent: Mozilla/5.0
+2024-11-26T10:30:08Z [ERROR] POST /api/login - status: 401 - response_time: 12ms - error: invalid_credentials
+2024-11-26T10:30:12Z [INFO] PUT /api/users/456/profile - status: 200 - response_time: 89ms - content_length: 1024
+2024-11-26T10:30:15Z [WARN] Rate limit exceeded for IP 192.168.1.50 - endpoint: /api/search - requests: 1000/hour
+2024-11-26T10:30:18Z [INFO] DELETE /api/orders/789 - status: 204 - response_time: 23ms - user_id: user123
+2024-11-26T10:30:22Z [ERROR] GET /api/products - status: 500 - response_time: 5000ms - error: internal_server_error
+2024-11-26T10:30:25Z [INFO] POST /api/orders - status: 201 - response_time: 156ms - order_id: ord_12345
+2024-11-26T10:30:30Z [WARN] Slow response detected: GET /api/analytics - response_time: 3.2s
+2024-11-26T10:30:35Z [INFO] GET /api/health - status: 200 - response_time: 8ms - health_check: passed
+2024-11-26T10:30:40Z [ERROR] Invalid API key: request to /api/secure - api_key: invalid_key_123
+2024-11-26T10:30:45Z [INFO] GET /api/users/789/orders - status: 200 - response_time: 67ms - result_count: 15
+2024-11-26T10:30:50Z [WARN] Circuit breaker OPEN for service: payment-service - endpoint: /api/payments
+2024-11-26T10:30:55Z [INFO] PATCH /api/users/234/settings - status: 200 - response_time: 34ms
+2024-11-26T10:31:00Z [ERROR] Request timeout: POST /api/upload - timeout: 30s - file_size: 50MB
+2024-11-26T10:31:05Z [INFO] GET /api/categories - status: 200 - response_time: 78ms - cache_hit: true
+2024-11-26T10:31:10Z [WARN] CORS violation blocked: origin https://malicious.example.com
+2024-11-26T10:31:15Z [INFO] OPTIONS /api/users - status: 200 - response_time: 5ms - preflight_check
+2024-11-26T10:31:20Z [ERROR] JWT token expired: GET /api/profile - token_exp: 2024-11-26T10:00:00Z
+2024-11-26T10:31:25Z [INFO] POST /api/refresh-token - status: 200 - response_time: 23ms - new_token_issued
+2024-11-26T10:31:30Z [WARN] Suspicious request pattern: 50 requests/sec from IP 203.0.113.42
+2024-11-26T10:31:35Z [INFO] GET /api/recommendations - status: 200 - response_time: 234ms - user_id: user567
+2024-11-26T10:31:40Z [ERROR] Request body too large: POST /api/data - size: 10MB - limit: 5MB
+2024-11-26T10:31:45Z [INFO] GET /api/notifications - status: 200 - response_time: 45ms - unread_count: 7
+2024-11-26T10:31:50Z [WARN] SSL certificate expires in 30 days - cert: api-gateway.example.com
+2024-11-26T10:31:55Z [INFO] HEAD /api/files/document.pdf - status: 200 - response_time: 12ms
+2024-11-26T10:32:00Z [ERROR] Service unavailable: GET /api/reports - upstream_service: analytics-service
+2024-11-26T10:32:05Z [INFO] Fallback response served: GET /api/reports - cached_data: true
+2024-11-26T10:32:10Z [INFO] POST /api/webhooks/payment - status: 200 - response_time: 89ms - webhook_id: wh_123
+2024-11-26T10:32:15Z [WARN] High memory usage: 85% - active_connections: 2500
+2024-11-26T10:32:20Z [INFO] GET /api/status - status: 200 - response_time: 15ms - version: v2.1.5
+2024-11-26T10:32:25Z [ERROR] Database connection failed: POST /api/users - db_error: connection_timeout
+2024-11-26T10:32:30Z [INFO] Request queued: POST /api/users - queue_position: 15 - estimated_wait: 30s
+2024-11-26T10:32:35Z [INFO] PUT /api/products/123 - status: 200 - response_time: 112ms - admin_user: admin001
+2024-11-26T10:32:40Z [WARN] API version deprecated: v1.0 - endpoint: /v1/legacy - migration_required
+2024-11-26T10:32:45Z [INFO] GET /v2/users/456 - status: 200 - response_time: 56ms - api_version: v2.1
+2024-11-26T10:32:50Z [ERROR] Schema validation failed: POST /api/orders - field: payment_method - error: required
+2024-11-26T10:32:55Z [INFO] Request retry successful: POST /api/orders - attempt: 2 - status: 201
+2024-11-26T10:33:00Z [WARN] Load balancer health check failed: backend-server-03
+2024-11-26T10:33:05Z [INFO] Traffic redirected: backend-server-03 removed from pool
+2024-11-26T10:33:10Z [INFO] GET /api/search?q=laptops - status: 200 - response_time: 145ms - results: 23
+2024-11-26T10:33:15Z [ERROR] Authentication service down: POST /api/login - service: auth-service
+2024-11-26T10:33:20Z [INFO] Cached authentication used: GET /api/profile - cache_ttl: 300s
+2024-11-26T10:33:25Z [WARN] Request flood detected: 500 requests in 10s from IP 10.0.0.100
+2024-11-26T10:33:30Z [INFO] IP blocked temporarily: 10.0.0.100 - duration: 15min
+2024-11-26T10:33:35Z [INFO] GET /api/metrics - status: 200 - response_time: 67ms - prometheus_format
+2024-11-26T10:33:40Z [ERROR] Upstream timeout: GET /api/inventory - service: inventory-service - timeout: 5s
+2024-11-26T10:33:45Z [INFO] Retry successful: GET /api/inventory - attempt: 2 - response_time: 234ms
+2024-11-26T10:33:50Z [WARN] Circuit breaker HALF_OPEN: payment-service - test_request_sent
+2024-11-26T10:33:55Z [INFO] Circuit breaker CLOSED: payment-service - service_recovered
+2024-11-26T10:34:00Z [INFO] POST /api/reviews - status: 201 - response_time: 89ms - review_id: rev_789
+2024-11-26T10:34:05Z [ERROR] Content-Type mismatch: POST /api/upload - expected: multipart/form-data
+2024-11-26T10:34:10Z [INFO] Request transformed: legacy format converted to v2 - endpoint: /api/users
+2024-11-26T10:34:15Z [WARN] Response compression disabled: large payload detected - size: 15MB
+2024-11-26T10:34:20Z [INFO] GET /api/admin/users - status: 200 - response_time: 123ms - admin_access: granted
+2024-11-26T10:34:25Z [ERROR] Admin access denied: GET /api/admin/logs - user_role: standard_user
+2024-11-26T10:34:30Z [INFO] WebSocket connection established: /ws/notifications - user_id: user890
+2024-11-26T10:34:35Z [WARN] WebSocket connection limit reached: 1000 concurrent connections
+2024-11-26T10:34:40Z [INFO] WebSocket connection closed: user_id: user345 - reason: client_disconnect
+2024-11-26T10:34:45Z [ERROR] GraphQL query complexity exceeded: max_depth: 10 - actual: 15
+2024-11-26T10:34:50Z [INFO] GraphQL query executed: users { id name email } - response_time: 89ms
+2024-11-26T10:34:55Z [WARN] API quota exceeded: user_id: user999 - daily_limit: 10000 - used: 10001
+2024-11-26T10:35:00Z [INFO] Quota reset scheduled: user_id: user999 - reset_time: 2024-11-27T00:00:00Z
+2024-11-26T10:35:05Z [ERROR] Malformed JSON: POST /api/data - syntax_error: unexpected_token
+2024-11-26T10:35:10Z [INFO] Request logged to audit trail: POST /api/sensitive - user_id: user123
+2024-11-26T10:35:15Z [WARN] Geolocation mismatch: user_id: user456 - expected: US - actual: CN
+2024-11-26T10:35:20Z [INFO] Security challenge issued: additional_verification_required
+2024-11-26T10:35:25Z [ERROR] XSS attempt blocked: GET /api/search?q=<script>alert('xss')</script>
+2024-11-26T10:35:30Z [INFO] Request sanitized: malicious content removed - endpoint: /api/search
+2024-11-26T10:35:35Z [WARN] SQL injection attempt: POST /api/users - pattern: '; DROP TABLE users; --
+2024-11-26T10:35:40Z [INFO] Security scan completed: 15 threats blocked in last hour
+2024-11-26T10:35:45Z [ERROR] File upload virus detected: filename: document.exe - threat: trojan
+2024-11-26T10:35:50Z [INFO] File quarantined: upload blocked - user_id: user777
+2024-11-26T10:35:55Z [WARN] Unusual user agent: bot-like behavior detected - user_agent: CustomBot/1.0
+2024-11-26T10:36:00Z [INFO] Bot challenge issued: CAPTCHA required - session_id: sess_abc123
+2024-11-26T10:36:05Z [ERROR] CAPTCHA failed: 3 attempts - session_blocked: 1 hour
+2024-11-26T10:36:10Z [INFO] API documentation accessed: GET /docs - user_type: developer
+2024-11-26T10:36:15Z [WARN] Documentation rate limit: 100 requests/hour exceeded
+2024-11-26T10:36:20Z [INFO] Swagger UI loaded: /docs/swagger - response_time: 234ms
+2024-11-26T10:36:25Z [ERROR] API key rotation required: key_age: 90_days - security_policy_violation
+2024-11-26T10:36:30Z [INFO] New API key generated: key_id: api_key_456 - user_id: user888
+2024-11-26T10:36:35Z [WARN] Legacy endpoint accessed: /api/v1/deprecated - migration_reminder_sent
+2024-11-26T10:36:40Z [INFO] Redirect issued: /api/v1/users -> /api/v2/users - status: 301
+2024-11-26T10:36:45Z [ERROR] Version not supported: API version 0.9 - minimum_required: 1.0
+2024-11-26T10:36:50Z [INFO] Maintenance mode activated: all requests returning 503
+2024-11-26T10:36:55Z [WARN] Maintenance bypass used: admin override - user: admin002
+2024-11-26T10:37:00Z [INFO] Maintenance mode deactivated: normal operations resumed
+2024-11-26T10:37:05Z [ERROR] Cache invalidation failed: redis connection timeout
+2024-11-26T10:37:10Z [INFO] Cache rebuilt: performance degradation - cache_miss_rate: 95%
+2024-11-26T10:37:15Z [WARN] Memory leak detected: heap usage increasing - rate: 5MB/min
+2024-11-26T10:37:20Z [INFO] Garbage collection triggered: memory_freed: 200MB
+2024-11-26T10:37:25Z [ERROR] Health check failed: downstream service unresponsive
+2024-11-26T10:37:30Z [INFO] Auto-scaling triggered: instances: 3 -> 5 - load_threshold: 80%
+2024-11-26T10:37:35Z [WARN] Response time SLA breach: average: 2.5s - SLA: 1.0s
+2024-11-26T10:37:40Z [INFO] Performance optimization applied: connection_pooling_increased
+2024-11-26T10:37:45Z [ERROR] DNS resolution failed: service discovery timeout
+2024-11-26T10:37:50Z [INFO] Fallback DNS used: service endpoint resolved
+2024-11-26T10:37:55Z [WARN] SSL handshake failure: client certificate invalid
+2024-11-26T10:38:00Z [INFO] Certificate validation bypassed: development environment
+2024-11-26T10:38:05Z [ERROR] Request pipeline error: middleware timeout - stage: authentication
+2024-11-26T10:38:10Z [INFO] Pipeline recovered: request processing resumed
+2024-11-26T10:38:15Z [WARN] Concurrent request limit: user_id: user101 - limit: 10 - current: 15
+2024-11-26T10:38:20Z [INFO] Excess requests queued: estimated_processing_time: 45s
+2024-11-26T10:38:25Z [ERROR] Queue overflow: requests dropped - queue_size: 1000 - limit: 1000
+2024-11-26T10:38:30Z [INFO] Load shedding activated: non-critical requests rejected
+2024-11-26T10:38:35Z [WARN] Database connection pool exhausted: waiting_requests: 50
+2024-11-26T10:38:40Z [INFO] Additional database connections allocated: pool_size: 50 -> 75
+2024-11-26T10:38:45Z [ERROR] Configuration reload failed: invalid JSON syntax
+2024-11-26T10:38:50Z [INFO] Configuration rollback: previous version restored
+2024-11-26T10:38:55Z [WARN] Log storage approaching limit: 90% disk usage
+2024-11-26T10:39:00Z [INFO] Log rotation completed: archived 2.5GB - free_space: 500GB 

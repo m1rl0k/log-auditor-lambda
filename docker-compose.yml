@@ -1,0 +1,34 @@
+version: '3.8'
+
+services:
+  localstack:
+    container_name: localstack-main
+    image: localstack/localstack:latest
+    ports:
+      - "4566:4566"            # LocalStack Gateway
+      - "4571:4571"            # LocalStack Web UI
+    environment:
+      # Services to enable
+      - SERVICES=lambda,cloudformation,logs,iam,sts
+      # Debug mode
+      - DEBUG=1
+      # Disable SSL certificate verification
+      - SKIP_SSL_CERT_DOWNLOAD=1
+      # Enable Docker inside LocalStack
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      # Persist data
+      - PERSISTENCE=1
+      - DATA_DIR=/tmp/localstack/data
+    volumes:
+      # Mount Docker socket for Lambda execution
+      - "/var/run/docker.sock:/var/run/docker.sock"
+      # Persist LocalStack data
+      - "./tmp/localstack:/tmp/localstack"
+      # Mount current directory for Lambda code
+      - ".:/workspace"
+    networks:
+      - localstack-network
+
+networks:
+  localstack-network:
+    driver: bridge 

@@ -1,0 +1,61 @@
+{
+  "source_type": "s3",
+  "source_config": {
+    "bucket_name": "my-microservice-logs",
+    "object_key": "payment-service/2024/11/26/application.log"
+  },
+  "custom_conditions": {
+    "conditions": [
+      {
+        "name": "PaymentFailure",
+        "pattern": "(?i)(payment.*failed|transaction.*declined|insufficient.*funds)",
+        "severity": "high",
+        "description": "Payment processing failure detected"
+      },
+      {
+        "name": "DatabaseConnectionFailure", 
+        "pattern": "(?i)(database.*connection.*failed|db.*timeout|connection.*pool.*exhausted)",
+        "severity": "critical",
+        "description": "Database connectivity issues"
+      },
+      {
+        "name": "ServiceUnavailable",
+        "pattern": "(?i)(service.*unavailable|downstream.*service.*error|external.*api.*timeout)",
+        "severity": "high", 
+        "description": "External service dependencies failing"
+      },
+      {
+        "name": "MemoryLeak",
+        "pattern": "(?i)(memory.*leak|out.*of.*memory|gc.*pressure|heap.*space)",
+        "severity": "critical",
+        "description": "Memory management issues"
+      },
+      {
+        "name": "SecurityBreach",
+        "pattern": "(?i)(unauthorized.*access|token.*hijacked|session.*compromised|brute.*force)",
+        "severity": "critical",
+        "description": "Security incident detected"
+      }
+    ],
+    "patterns": {
+      "microservice_patterns": [
+        "(?i)(circuit.*breaker.*open|fallback.*triggered)",
+        "(?i)(service.*mesh.*error|istio.*error|envoy.*error)", 
+        "(?i)(kubernetes.*pod.*crashed|container.*restart|oom.*killed)",
+        "(?i)(load.*balancer.*error|upstream.*timeout)",
+        "(?i)(retry.*exhausted|backoff.*triggered)"
+      ],
+      "performance_patterns": [
+        "(?i)database.*query.*time:?\\s*([0-9]+(?:\\.[0-9]+)?)\\s*(ms|seconds?|s)",
+        "(?i)api.*response.*time:?\\s*([0-9]+(?:\\.[0-9]+)?)\\s*(ms|seconds?|s)",
+        "(?i)cache.*miss.*duration:?\\s*([0-9]+(?:\\.[0-9]+)?)\\s*(ms|seconds?|s)"
+      ],
+      "business_logic_patterns": [
+        "(?i)(business.*rule.*violation|validation.*failed)",
+        "(?i)(workflow.*step.*failed|process.*timeout)",
+        "(?i)(audit.*trail.*missing|compliance.*violation)"
+      ]
+    }
+  },
+  "output_bucket": "my-analysis-results"
+} 
